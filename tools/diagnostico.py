@@ -136,6 +136,7 @@ def run_pipeline(model_path, camera, frames, width, height, exposure=None):
     renderer = av.AvatarRenderer()
     backgrounds = stage.Backgrounds(os.path.join(ROOT, "assets", "backgrounds"), (w, h))
     smoother = OneEuroFilter()
+    body = sk.BodyState()
 
     screen = np.empty((h, w, 3), np.uint8)
     out = None
@@ -153,7 +154,8 @@ def run_pipeline(model_path, camera, frames, width, height, exposure=None):
 
         bg = backgrounds.get(frame)
         if state["landmarks"] is not None:
-            skel = sk.from_landmarks(state["landmarks"], w, h, smoother=smoother)
+            skel = sk.from_landmarks(state["landmarks"], w, h, smoother=smoother,
+                                     state=body)
             canvas = renderer.render(skel, packs[0])
             out = stage.composite(bg, canvas, packs[0].theme.glow,
                                   packs[0].theme.glow_strength,

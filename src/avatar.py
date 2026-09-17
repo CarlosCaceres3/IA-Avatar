@@ -41,6 +41,10 @@ PROPORTIONS = {
 HAND_R = 0.085
 FOOT_R = 0.085
 
+# Tope de grosor de una extremidad como fraccion de su propio largo en 2D.
+# Evita el "muñon" cuando un hueso apunta a la camara y se ve muy corto.
+FORESHORTEN_CAP = 0.62
+
 
 @dataclass
 class Theme:
@@ -320,9 +324,18 @@ class AvatarRenderer:
         if img is not None:
             warp_on_bone(canvas, img, p0, p1)
             return
+
         w0, w1 = PROPORTIONS[name]
-        limb(canvas, p0, p1, w0 * sk.scale, w1 * sk.scale,
-             _rgba(fill), _rgba(theme.outline), ow)
+        w0, w1 = w0 * sk.scale, w1 * sk.scale
+
+        # Cuando el brazo apunta a la camara, el hueso mide casi nada en 2D
+        # pero su grosor seguia siendo el de un brazo entero: salia un muñon
+        # gordo pegado al hombro. El grosor se limita al largo del hueso.
+        length = float(np.linalg.norm(np.asarray(p1) - np.asarray(p0)))
+        cap = max(length * FORESHORTEN_CAP, 2.0)
+        w0, w1 = min(w0, cap), min(w1, cap)
+
+        limb(canvas, p0, p1, w0, w1, _rgba(fill), _rgba(theme.outline), ow)
 
     def _arm(self, canvas, sk, pack, theme, ow, side):
         s = SIDES[side]
@@ -366,8 +379,7 @@ class AvatarRenderer:
             warp_on_bone(canvas, img, sk.shoulder_c, sk.hip_c,
                          width_gain=max(sk.shoulder_w, 1.0) / max(sk.torso_len, 1.0))
         else:
-            quad = np.array([sk.pts[R_SHOULDER], sk.pts[L_SHOULDER],
-                             sk.pts[L_HIP], sk.pts[R_HIP]], np.float32)
+            quad = sk.torso_quad()
             center = quad.mean(axis=0)
             margin = 0.075 * sk.scale
 

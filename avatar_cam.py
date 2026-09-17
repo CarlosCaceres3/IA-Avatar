@@ -156,6 +156,7 @@ def main():
     landmarker = build_landmarker(args.model, mailbox)
     smoother = OneEuroFilter(freq=args.fps, min_cutoff=1.1, beta=0.018)
     presence = Hysteresis(on_frames=2, off_frames=10)
+    body = sk.BodyState()      # memoria del tamano del cuerpo entre cuadros
 
     vcam = VirtualCamera(width, height, args.fps)
     if not args.no_virtualcam:
@@ -218,7 +219,7 @@ def main():
 
             if visible and landmarks is not None:
                 skel = sk.from_landmarks(landmarks, width, height,
-                                         smoother=smoother, fps=fps_avg)
+                                         smoother=smoother, fps=fps_avg, state=body)
                 canvas = renderer.render(skel, pack)
                 if show_bones:
                     av.draw_debug_skeleton(canvas, skel)
@@ -227,6 +228,7 @@ def main():
                                       roi=skel.bbox(), out=screen)
             else:
                 smoother.reset()
+                body.reset()      # la proxima persona puede tener otro tamano
                 np.copyto(screen, background)
                 out = screen
                 stage.draw_banner(out, "Ponte frente a la camara",

@@ -57,6 +57,59 @@ class OneEuroFilter:
         return x_hat
 
 
+class ScaleTracker:
+    """Sigue el tamano del cuerpo en pixeles con memoria larga.
+
+    El tamano de una persona en pantalla solo cambia cuando se acerca o se
+    aleja, y eso es lento. Cualquier cambio rapido en la medida del cuadro
+    es ruido o un cambio de postura, no de distancia, asi que se filtra
+    fuerte. La excepcion es un salto grande y sostenido: ahi entro otra
+    persona al cuadro y conviene adoptar su tamano de una vez.
+
+    Se usa un One Euro y no un promedio fijo porque los dos requisitos son
+    opuestos: quieto hay que filtrar muy fuerte (que no respire), pero si la
+    persona camina hacia atras el avatar tiene que encoger sin arrastrarse.
+    Un promedio fijo obliga a elegir uno de los dos; el One Euro sube el
+    corte justo cuando la medida se mueve de verdad.
+    """
+
+    def __init__(self, freq=30.0, jump_ratio=0.40, jump_frames=4):
+        self._filter = OneEuroFilter(freq=freq, min_cutoff=0.40, beta=0.020)
+        self.jump_ratio = jump_ratio
+        self.jump_frames = jump_frames
+        self.value = None
+        self._jumping = 0
+
+    def reset(self):
+        self._filter.reset()
+        self.value = None
+        self._jumping = 0
+
+    def update(self, measured, freq=None):
+        measured = float(measured)
+        if measured <= 1e-3:
+            return self.value if self.value else 1.0
+
+        if self.value is None:
+            self.value = float(self._filter(np.array([measured], np.float32), freq)[0])
+            return self.value
+
+        if abs(measured - self.value) / self.value > self.jump_ratio:
+            # Se exige que el salto persista: un cuadro suelto con los
+            # landmarks mal puestos no debe reescalar el avatar. Pero si de
+            # verdad entro otra persona, se adopta su tamano sin arrastre.
+            self._jumping += 1
+            if self._jumping >= self.jump_frames:
+                self._filter.reset()
+                self.value = measured
+                self._jumping = 0
+            return self.value
+
+        self._jumping = 0
+        self.value = float(self._filter(np.array([measured], np.float32), freq)[0])
+        return self.value
+
+
 class Hysteresis:
     """Evita parpadeo al aparecer/desaparecer la persona frente a la camara."""
 
