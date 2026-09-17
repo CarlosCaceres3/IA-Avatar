@@ -13,6 +13,7 @@ Teclas:
     A / D      avatar anterior / siguiente (a todas las personas)
     F          fondo siguiente
     G          espejo (on/off)
+    C          cara real de la persona sobre el avatar (on/off)
     E          esqueleto de depuracion (on/off)
     H          ocultar/mostrar los datos en pantalla
     V          activar/pausar la camara virtual
@@ -40,6 +41,7 @@ import skeleton as sk                                    # noqa: E402
 import stage                                             # noqa: E402
 from camera_out import VirtualCamera                     # noqa: E402
 from people import Crowd                                 # noqa: E402
+import realface                                          # noqa: E402
 from smoothing import Hysteresis                         # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -202,6 +204,7 @@ def main():
     render_q = 0.0             # resolucion de dibujo en uso
 
     mirror = True
+    real_face = False          # pegar la cara de la persona sobre el avatar
     show_hud = True
     show_bones = False
     fps_avg = float(args.fps)
@@ -273,6 +276,9 @@ def main():
                     # El recorte de cara usa el cuadro COMPLETO, pero el
                     # esqueleto puede estar reducido: se devuelve a escala.
                     renderer.render(skel, suyo, canvas=canvas)
+                    if real_face:
+                        # Va despues del avatar: tapa la cara dibujada.
+                        realface.paste(canvas, frame, skel.head_c, skel.head_r, q)
                     if show_bones:
                         av.draw_debug_skeleton(canvas, skel)
 
@@ -296,9 +302,10 @@ def main():
             if show_hud:
                 stage.draw_hud(out, [
                     "Avatar: " + pack.name + "   Fondo: " + backgrounds.name +
-                    "   Personas: " + str(len(activas)) + "/" + str(max_people),
+                    "   Personas: " + str(len(activas)) + "/" + str(max_people) +
+                    ("   CARA REAL" if real_face else ""),
                     "FPS: " + str(int(fps_avg)) + "   " + vcam.status(),
-                    "A/D avatar   F fondo   G espejo   V camara virtual   H ocultar   Q salir",
+                    "A/D avatar   F fondo   C cara real   G espejo   V camara   Q salir",
                 ])
 
             vcam.send(out)
@@ -324,6 +331,8 @@ def main():
                 backgrounds.next()
             elif key == ord("g"):
                 mirror = not mirror
+            elif key == ord("c"):
+                real_face = not real_face
             elif key == ord("e"):
                 show_bones = not show_bones
             elif key == ord("h"):

@@ -1,0 +1,15 @@
+{
+  "name": "Bolivar",
+  "skin": "#C68642",
+  "suit": "#1B2A5E",
+  "accent": "#D4A62A",
+  "outline": "#141026",
+  "glow": "#D4A62A",
+  "glow_strength": 0.35,
+  "draw_face": true,
+  "parts": {
+    "head": {
+      "size": 1.22
+    }
+  }
+}

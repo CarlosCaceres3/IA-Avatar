@@ -176,6 +176,41 @@ Theme(
 El código está en `src/shading.py`. Cuesta unos 22 ms por cuadro a 720p (contra 3 ms
 del dibujo plano), por eso se dibuja a 0.6 de resolución y se amplía al componer.
 
+### Cara real de la persona (tecla `C`)
+
+Pulsando **`C`** el avatar deja de tener cara dibujada y lleva **la cara de quien
+está frente a la cámara**, recortada en óvalo con borde difuminado y siguiendo la
+inclinación de su cabeza. Funciona con cualquier avatar y con las dos personas a la
+vez: cada una lleva la suya.
+
+Es la forma de poner "una persona real" sin problemas de derechos de imagen — la
+cara es la de quien está ahí, por voluntad propia. Y para un stand suele funcionar
+mejor que un personaje famoso: la gente se ve **a sí misma** convertida en personaje.
+
+No necesita detector facial ni modelo extra: el esqueleto ya sabe dónde está la
+cabeza, cuánto mide y cuánto está inclinada, y el avatar se dibuja con esa misma
+inclinación, así que la cara del cuadro ya viene orientada. Está en `src/realface.py`
+y se ajusta con `GAIN` (tamaño), `FEATHER` (suavidad del borde) y `ASPECT` (forma).
+
+### Personajes de dominio público
+
+```bash
+python tools/crear_packs_historicos.py
+```
+
+Genera tres avatares de personajes **libres de derechos**: **Bolívar** (casaca azul,
+banda roja, charreteras y su peinado), **Quijote** (armadura, yelmo de bacía y barba
+en punta) y **Frankenstein** (cabeza plana, flequillo y pernos).
+
+Las piezas se dibujan por código, así que tampoco dependen de ilustraciones de
+terceros: el pack completo es original y se puede usar sin pedir permiso a nadie.
+
+> **Sobre famosos:** la cara de una persona viva y reconocible —foto o caricatura—
+> está protegida por su derecho de imagen, y una caricatura se define justamente por
+> ser reconocible. Las alternativas que sí funcionan: la cara del propio visitante
+> (tecla `C`), alguien que dé permiso por escrito, personajes de dominio público como
+> estos tres, o un personaje con licencia comprada.
+
 ### Poner sus propias imágenes
 
 ```bash

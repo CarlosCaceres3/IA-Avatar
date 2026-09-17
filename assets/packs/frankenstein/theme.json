@@ -1,0 +1,15 @@
+{
+  "name": "Frankenstein",
+  "skin": "#6E8F5A",
+  "suit": "#2B2B33",
+  "accent": "#6E8F5A",
+  "outline": "#16161A",
+  "glow": "#5A8F4A",
+  "glow_strength": 0.4,
+  "draw_face": true,
+  "parts": {
+    "head": {
+      "size": 1.24
+    }
+  }
+}

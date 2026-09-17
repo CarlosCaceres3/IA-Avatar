@@ -1,0 +1,15 @@
+{
+  "name": "Quijote",
+  "skin": "#D2A679",
+  "suit": "#A8ADB5",
+  "accent": "#A8ADB5",
+  "outline": "#3A362F",
+  "glow": "#C8CEDA",
+  "glow_strength": 0.4,
+  "draw_face": true,
+  "parts": {
+    "head": {
+      "size": 1.3
+    }
+  }
+}
