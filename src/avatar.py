@@ -424,7 +424,7 @@ class AvatarRenderer:
     def __init__(self, vis_thr=0.35):
         self.vis_thr = vis_thr
 
-    def render(self, sk, pack):
+    def render(self, sk, pack, expr=None):
         canvas = np.zeros((sk.height, sk.width, 4), dtype=np.uint8)
         theme = pack.theme
         ow = theme.outline_w * sk.scale
@@ -438,7 +438,7 @@ class AvatarRenderer:
         self._torso(canvas, sk, pack, theme, ow)
         self._leg(canvas, sk, pack, theme, ow, near)
         self._arm(canvas, sk, pack, theme, ow, near)
-        self._head(canvas, sk, pack, theme, ow)
+        self._head(canvas, sk, pack, theme, ow, expr)
         return canvas
 
     def _vis(self, sk, *idx):
@@ -534,7 +534,7 @@ class AvatarRenderer:
              PROPORTIONS["neck"][0] * sk.scale, PROPORTIONS["neck"][1] * sk.scale,
              _rgba(theme.skin), _rgba(theme.outline), ow)
 
-    def _head(self, canvas, sk, pack, theme, ow):
+    def _head(self, canvas, sk, pack, theme, ow, expr=None):
         img = pack.part("head")
         r = sk.head_r
 
@@ -552,26 +552,67 @@ class AvatarRenderer:
             if not theme.draw_face:
                 return
 
+        self._face(canvas, sk, theme, r, expr)
+
+    def _face(self, canvas, sk, theme, r, expr):
+        """Ojos, boca y cejas, movidos por la expresion real de la persona."""
         a = math.radians(sk.head_angle)
         ux = np.array([math.cos(a), math.sin(a)], np.float32)     # linea de orejas
         uy = _perp(ux)                                            # hacia la barbilla
+        ink = _rgba(theme.outline)
+
+        # Sin deteccion de cara, el avatar se queda con la cara neutra de
+        # siempre: ojos abiertos y media sonrisa.
+        abierto_l = abierto_r = 1.0
+        boca = 0.0
+        sonrisa = 0.45
+        ceja = 0.0
+        if expr is not None and expr.valid:
+            abierto_l, abierto_r = expr.eye_left, expr.eye_right
+            boca, sonrisa, ceja = expr.mouth_open, expr.smile, expr.brow
 
         # La pupila se corre hacia donde apunta la nariz: da sensacion de mirada.
         gaze = (sk.pts[NOSE] - sk.head_c) / max(r, 1e-3)
         gaze = np.clip(gaze, -0.55, 0.55) * r * 0.16
 
         eye_r = r * 0.20
-        for sign in (-1.0, 1.0):
+        for sign, apertura in ((-1.0, abierto_r), (1.0, abierto_l)):
             eye_c = sk.head_c + ux * (sign * r * 0.36) - uy * (r * 0.10)
-            cv2.circle(canvas, _pt(eye_c), max(int(eye_r), 1),
-                       (250, 250, 250, 255), -1, cv2.LINE_AA)
-            cv2.circle(canvas, _pt(eye_c + gaze), max(int(eye_r * 0.52), 1),
-                       _rgba(theme.outline), -1, cv2.LINE_AA)
+            alto = max(int(eye_r * apertura), 1)
+
+            if apertura > 0.22:
+                cv2.ellipse(canvas, _pt(eye_c), (max(int(eye_r), 1), alto),
+                            sk.head_angle, 0, 360, (250, 250, 250, 255), -1, cv2.LINE_AA)
+                pupila = max(int(eye_r * 0.52), 1)
+                cv2.ellipse(canvas, _pt(eye_c + gaze),
+                            (pupila, max(min(pupila, alto), 1)),
+                            sk.head_angle, 0, 360, ink, -1, cv2.LINE_AA)
+            else:
+                # Ojo cerrado: una linea curva lee mucho mejor que una
+                # elipse aplastada, que a esa altura se ve como suciedad.
+                cv2.ellipse(canvas, _pt(eye_c), (max(int(eye_r), 1), max(int(eye_r * 0.5), 1)),
+                            sk.head_angle, 200, 340, ink, max(int(r * 0.055), 2), cv2.LINE_AA)
+
+            # Ceja: sube cuando la persona levanta las cejas.
+            if ceja > 0.12:
+                ceja_c = eye_c - uy * (r * (0.26 + 0.12 * ceja))
+                cv2.ellipse(canvas, _pt(ceja_c),
+                            (max(int(eye_r * 1.05), 1), max(int(eye_r * 0.45), 1)),
+                            sk.head_angle, 200, 340, ink, max(int(r * 0.05), 2), cv2.LINE_AA)
 
         mouth_c = sk.head_c + uy * (r * 0.44)
-        cv2.ellipse(canvas, _pt(mouth_c), (max(int(r * 0.30), 1), max(int(r * 0.20), 1)),
-                    sk.head_angle, 15, 165, _rgba(theme.outline),
-                    max(int(r * 0.09), 2), cv2.LINE_AA)
+        if boca > 0.12:
+            # Boca abierta: ovalo oscuro que crece con la mandibula.
+            rx = max(int(r * (0.22 + 0.08 * sonrisa)), 2)
+            ry = max(int(r * (0.05 + 0.34 * boca)), 2)
+            cv2.ellipse(canvas, _pt(mouth_c), (rx, ry), sk.head_angle,
+                        0, 360, ink, -1, cv2.LINE_AA)
+        else:
+            # Boca cerrada: arco que se curva con la sonrisa.
+            ry = max(int(r * (0.05 + 0.20 * sonrisa)), 1)
+            cv2.ellipse(canvas, _pt(mouth_c), (max(int(r * 0.30), 1), ry),
+                        sk.head_angle, 15, 165, ink,
+                        max(int(r * 0.09), 2), cv2.LINE_AA)
 
 
 def draw_debug_skeleton(canvas, sk, color=(0, 255, 0, 255)):

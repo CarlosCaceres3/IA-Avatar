@@ -14,6 +14,8 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+FACE_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
+            "face_landmarker/float16/latest/face_landmarker.task")
 
 MODELS = {
     "lite": BASE + "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
@@ -35,17 +37,32 @@ def download(name, url, folder):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--todos", action="store_true", help="descargar lite, full y heavy")
+    p.add_argument("--cara", action="store_true",
+                   help="solo el modelo de expresion facial")
     args = p.parse_args()
 
     folder = os.path.join(ROOT, "models")
     os.makedirs(folder, exist_ok=True)
 
-    names = list(MODELS) if args.todos else ["full"]
-    for name in names:
+    if not args.cara:
+        names = list(MODELS) if args.todos else ["full"]
+        for name in names:
+            try:
+                download(name, MODELS[name], folder)
+            except Exception as exc:
+                print("  fallo " + name + ": " + str(exc))
+
+    # El de la cara va siempre: sin el, el avatar no cierra los ojos.
+    target = os.path.join(folder, "face_landmarker.task")
+    if os.path.exists(target):
+        print("ya existe: face_landmarker.task")
+    else:
         try:
-            download(name, MODELS[name], folder)
+            print("descargando el modelo de cara ...")
+            urllib.request.urlretrieve(FACE_URL, target)
+            print("  guardado (" + str(round(os.path.getsize(target) / 1e6, 1)) + " MB)")
         except Exception as exc:
-            print("  fallo " + name + ": " + str(exc))
+            print("  fallo el modelo de cara: " + str(exc))
 
 
 if __name__ == "__main__":

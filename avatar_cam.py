@@ -1,8 +1,9 @@
 """Avatar en vivo por camara - demo de stand.
 
 Captura la camara, detecta la pose de la persona con MediaPipe y dibuja un
-avatar articulado que imita sus movimientos. La persona real no aparece:
-en pantalla solo se ve el avatar sobre el fondo elegido.
+avatar articulado que imita sus movimientos, incluida la expresion de la
+cara: si la persona cierra los ojos, el avatar los cierra. La persona real
+no aparece: en pantalla solo se ve el avatar sobre el fondo elegido.
 
 Uso:
     python avatar_cam.py
@@ -14,6 +15,7 @@ Teclas:
     F          fondo siguiente
     G          espejo (on/off)
     E          esqueleto de depuracion (on/off)
+    R          valores de la cara en vivo (on/off)
     H          ocultar/mostrar los datos en pantalla
     V          activar/pausar la camara virtual
     P          guardar una foto PNG en capturas/
@@ -39,10 +41,17 @@ import avatar as av                                      # noqa: E402
 import skeleton as sk                                    # noqa: E402
 import stage                                             # noqa: E402
 from camera_out import VirtualCamera                     # noqa: E402
+from face import FaceTracker                             # noqa: E402
 from smoothing import Hysteresis, OneEuroFilter          # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WINDOW = "Avatar IA - Festech"
+
+
+def _bar(valor, ancho=10):
+    """Barra de texto para ver un valor de 0 a 1 de un vistazo."""
+    lleno = int(round(max(0.0, min(1.0, valor)) * ancho))
+    return "[" + "#" * lleno + "." * (ancho - lleno) + "]"
 
 # El detector no gana precision con mas resolucion (internamente reescala),
 # pero si cuesta mas convertir el cuadro. Se le manda una version chica.
@@ -119,6 +128,10 @@ def parse_args():
     p.add_argument("--exposure", type=float, default=None,
                    help="exposicion manual (ej. -5). Sube el FPS si hay buena luz.")
     p.add_argument("--model", default=os.path.join(ROOT, "models", "pose_landmarker_full.task"))
+    p.add_argument("--face-model",
+                   default=os.path.join(ROOT, "models", "face_landmarker.task"))
+    p.add_argument("--no-face", action="store_true",
+                   help="no seguir la cara (ahorra CPU si hace falta)")
     p.add_argument("--no-virtualcam", action="store_true", help="no abrir la camara virtual")
     p.add_argument("--fullscreen", action="store_true", help="arrancar en pantalla completa")
     p.add_argument("--avatar", type=int, default=0, help="indice del avatar inicial")
@@ -158,6 +171,15 @@ def main():
     presence = Hysteresis(on_frames=2, off_frames=10)
     body = sk.BodyState()      # memoria del tamano del cuerpo entre cuadros
 
+    face = None
+    if not args.no_face:
+        if os.path.exists(args.face_model):
+            face = FaceTracker(args.face_model)
+            print("Seguimiento de cara activo")
+        else:
+            print("Sin modelo de cara (" + args.face_model + ").")
+            print("Descargalo con: python tools/descargar_modelo.py --cara")
+
     vcam = VirtualCamera(width, height, args.fps)
     if not args.no_virtualcam:
         if vcam.open():
@@ -180,6 +202,7 @@ def main():
     mirror = True
     show_hud = True
     show_bones = False
+    show_face_debug = False
     fps_avg = float(args.fps)
     t_prev = time.perf_counter()
     t_start = t_prev
@@ -203,8 +226,12 @@ def main():
             rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
             timestamp_ms = int((time.perf_counter() - t_start) * 1000.0)
-            landmarker.detect_async(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb),
-                                    timestamp_ms)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            landmarker.detect_async(mp_image, timestamp_ms)
+            if face is not None:
+                # El mismo cuadro alimenta los dos detectores; cada uno
+                # corre en su propio hilo y no se esperan entre si.
+                face.submit(mp_image, timestamp_ms)
 
             now = time.perf_counter()
             dt = now - t_prev
@@ -220,7 +247,8 @@ def main():
             if visible and landmarks is not None:
                 skel = sk.from_landmarks(landmarks, width, height,
                                          smoother=smoother, fps=fps_avg, state=body)
-                canvas = renderer.render(skel, pack)
+                expr = face.expression if face is not None else None
+                canvas = renderer.render(skel, pack, expr)
                 if show_bones:
                     av.draw_debug_skeleton(canvas, skel)
                 out = stage.composite(background, canvas,
@@ -229,6 +257,8 @@ def main():
             else:
                 smoother.reset()
                 body.reset()      # la proxima persona puede tener otro tamano
+                if face is not None:
+                    face.reset()
                 np.copyto(screen, background)
                 out = screen
                 stage.draw_banner(out, "Ponte frente a la camara",
@@ -240,6 +270,14 @@ def main():
                     "FPS: " + str(int(fps_avg)) + "   " + vcam.status(),
                     "A/D avatar   F fondo   G espejo   V camara virtual   H ocultar   Q salir",
                 ])
+                if show_face_debug and face is not None:
+                    e = face.expression
+                    stage.draw_hud(out, [
+                        "CARA: " + ("detectada" if e.valid else "NO detectada"),
+                        "ojo izq " + _bar(e.eye_left) + "   ojo der " + _bar(e.eye_right),
+                        "boca    " + _bar(e.mouth_open) + "   sonrisa " + _bar(e.smile),
+                        "cejas   " + _bar(e.brow),
+                    ], corner=(16, height - 110), scale=0.55)
 
             vcam.send(out)
 
@@ -266,6 +304,8 @@ def main():
                 mirror = not mirror
             elif key == ord("e"):
                 show_bones = not show_bones
+            elif key == ord("r"):
+                show_face_debug = not show_face_debug
             elif key == ord("h"):
                 show_hud = not show_hud
             elif key == ord("v"):
@@ -303,6 +343,8 @@ def main():
                 pass
         cap.release()
         landmarker.close()
+        if face is not None:
+            face.close()
         vcam.close()
         cv2.destroyAllWindows()
 
