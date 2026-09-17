@@ -6,5 +6,10 @@
   "outline": "#3C3734",
   "glow": "#2882F0",
   "glow_strength": 0.5,
-  "draw_face": false
+  "draw_face": false,
+  "parts": {
+    "head": {
+      "size": 1.25
+    }
+  }
 }

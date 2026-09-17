@@ -36,7 +36,7 @@ PROPORTIONS = {
     "forearm": (0.098, 0.072),
     "thigh": (0.165, 0.125),
     "shin": (0.125, 0.082),
-    "neck": (0.105, 0.105),
+    "neck": (0.120, 0.120),
 }
 HAND_R = 0.085
 FOOT_R = 0.085
@@ -161,36 +161,60 @@ def warp_rgba(canvas, rgba, M):
     roi[:, :, 3:4] = np.maximum(roi[:, :, 3:4], warped[:, :, 3:4])
 
 
-def warp_on_bone(canvas, rgba, p0, p1, width_gain=1.0):
-    """Estira un PNG sobre un hueso.
+def warp_on_bone(canvas, rgba, p0, p1, anchor_a=(0.5, 0.0), anchor_b=(0.5, 1.0),
+                 width_gain=1.0):
+    """Coloca un PNG sobre un hueso alineando sus articulaciones.
 
-    Convencion del PNG: el eje largo va de arriba (articulacion inicial) a
-    abajo (articulacion final), centrado horizontalmente.
+    anchor_a y anchor_b dicen DONDE estan las dos articulaciones dentro de
+    la imagen, en coordenadas de 0 a 1. Por defecto se asume borde superior
+    centrado y borde inferior centrado, que es como estaba antes.
+
+    Poder declararlas es lo que permite usar dibujos de verdad: un brazo
+    ilustrado trae contorno, sombra y holgura alrededor, y su articulacion
+    casi nunca cae justo en el borde de la imagen. Antes habia que recortar
+    al pixel exacto o la pieza quedaba corrida.
+
+    La transformacion es una semejanza (giro + escala uniforme), asi que el
+    dibujo nunca sale estirado ni aplastado.
     """
     h, w = rgba.shape[:2]
-    d = np.asarray(p1, np.float32) - np.asarray(p0, np.float32)
-    length = float(np.linalg.norm(d))
-    if length < 1e-3 or h < 2:
+    if h < 2 or w < 2:
         return
-    u = d / length
-    n = _perp(u)
-    s = length / h
 
-    src = np.array([[w * 0.5, 0.0], [w * 0.5, h], [w, 0.0]], np.float32)
-    dst = np.array([p0, p1, p0 + n * (w * 0.5 * s * width_gain)], np.float32)
+    a = np.array([anchor_a[0] * w, anchor_a[1] * h], np.float32)
+    b = np.array([anchor_b[0] * w, anchor_b[1] * h], np.float32)
+    d_img = b - a
+    len_img = float(np.linalg.norm(d_img))
+
+    d_dst = np.asarray(p1, np.float32) - np.asarray(p0, np.float32)
+    len_dst = float(np.linalg.norm(d_dst))
+    if len_img < 1.0 or len_dst < 1e-3:
+        return
+
+    n_img = _perp(d_img / len_img)
+    n_dst = _perp(d_dst / len_dst)
+
+    src = np.array([a, b, a + n_img * (len_img * 0.5)], np.float32)
+    dst = np.array([p0, p1, p0 + n_dst * (len_dst * 0.5 * width_gain)], np.float32)
     warp_rgba(canvas, rgba, cv2.getAffineTransform(src, dst))
 
 
-def warp_centered(canvas, rgba, center, angle_deg, target_h):
-    """Coloca un PNG centrado, rotado y escalado (para la cabeza o un casco)."""
+def warp_centered(canvas, rgba, center, angle_deg, target_h, anchor=(0.5, 0.5)):
+    """Coloca un PNG por su punto de anclaje, rotado y escalado.
+
+    anchor es el punto de la imagen que se apoya en 'center'. Para una
+    cabeza dibujada, ese punto rara vez es el centro geometrico del PNG:
+    si el dibujo trae pelo o sombrero, el centro del craneo esta mas abajo.
+    """
     h, w = rgba.shape[:2]
     if h < 2:
         return
     s = float(target_h) / h
+    ax, ay = anchor[0] * w, anchor[1] * h
     # El eje Y de la imagen apunta hacia abajo, por eso el angulo va negado.
-    M = cv2.getRotationMatrix2D((w * 0.5, h * 0.5), -angle_deg, s)
-    M[0, 2] += float(center[0]) - w * 0.5
-    M[1, 2] += float(center[1]) - h * 0.5
+    M = cv2.getRotationMatrix2D((ax, ay), -angle_deg, s)
+    M[0, 2] += float(center[0]) - ax
+    M[1, 2] += float(center[1]) - ay
     warp_rgba(canvas, rgba, M)
 
 
@@ -219,12 +243,98 @@ def _parse_color(value, fallback):
 
 
 @dataclass
+class PartSpec:
+    """Donde estan las articulaciones dentro del PNG de una parte.
+
+    Para huesos (brazo, muslo...): 'a' es la articulacion de arriba y 'b'
+    la de abajo, en coordenadas 0..1 de la imagen.
+    Para piezas centradas (cabeza, mano): 'anchor' es el punto que se apoya
+    sobre la articulacion, y 'size' multiplica el tamano.
+    """
+
+    a: tuple = (0.5, 0.0)
+    b: tuple = (0.5, 1.0)
+    anchor: tuple = (0.5, 0.5)
+    width: float = 1.0
+    size: float = 1.0
+
+    def merged(self, cfg):
+        """Aplica encima solo los campos presentes en theme.json.
+
+        Se combina en vez de reemplazar: declarar 'size' para retocar el
+        tamano no debe hacer perder las articulaciones que ya se dedujeron
+        del alfa. Antes, tocar un campo descartaba todo lo demas.
+        """
+        if not cfg:
+            return self
+
+        def point(key, fallback):
+            value = cfg.get(key)
+            if isinstance(value, (list, tuple)) and len(value) == 2:
+                return (float(value[0]), float(value[1]))
+            return fallback
+
+        return PartSpec(
+            a=point("a", self.a),
+            b=point("b", self.b),
+            anchor=point("anchor", self.anchor),
+            width=float(cfg.get("width", self.width)),
+            size=float(cfg.get("size", self.size)),
+        )
+
+
+DEFAULT_SPEC = PartSpec()
+
+
+def auto_spec(rgba):
+    """Deduce las articulaciones de una parte mirando su canal alfa.
+
+    El dibujo ocupa solo una parte del PNG; el resto es transparente. Esa
+    zona transparente es justo el margen que descolocaba las piezas. Aqui
+    se mide la caja real del dibujo y se toma:
+
+      a = centro de la franja superior pintada  (articulacion de arriba)
+      b = centro de la franja inferior pintada  (articulacion de abajo)
+
+    Se usa una franja y no una sola fila porque la fila del borde suele
+    tener cuatro pixeles sueltos del antialiasing.
+
+    Asi un pack funciona sin escribir una sola coordenada a mano, y
+    theme.json queda solo para ajustes finos.
+    """
+    alpha = rgba[:, :, 3]
+    h, w = alpha.shape[:2]
+    ys, xs = np.nonzero(alpha > 8)
+    if ys.size == 0:
+        return DEFAULT_SPEC
+
+    y0, y1 = int(ys.min()), int(ys.max())
+    x0, x1 = int(xs.min()), int(xs.max())
+    banda = max(1, int((y1 - y0) * 0.06))
+
+    top_xs = xs[ys <= y0 + banda]
+    bot_xs = xs[ys >= y1 - banda]
+    ax = float(top_xs.mean()) if top_xs.size else (x0 + x1) * 0.5
+    bx = float(bot_xs.mean()) if bot_xs.size else (x0 + x1) * 0.5
+
+    return PartSpec(
+        a=(ax / w, y0 / h),
+        b=(bx / w, (y1 + 1) / h),
+        anchor=((x0 + x1 + 1) * 0.5 / w, (y0 + y1 + 1) * 0.5 / h),
+        # El tamano se corrige por cuanto del PNG ocupa realmente el dibujo:
+        # si no, una pieza con mucho margen se veria mas chica que el resto.
+        size=h / max(y1 + 1 - y0, 1),
+    )
+
+
+@dataclass
 class AvatarPack:
     """Un avatar seleccionable: colores + imagenes opcionales por parte."""
 
     name: str
     theme: Theme
     parts: dict = field(default_factory=dict)
+    specs: dict = field(default_factory=dict)
 
     @classmethod
     def builtin(cls, theme):
@@ -237,6 +347,7 @@ class AvatarPack:
         theme = Theme(name=name, suit=(90, 30, 25), skin=(220, 180, 120),
                       accent=(255, 210, 60), outline=(255, 245, 210),
                       glow=(255, 190, 40), glow_strength=0.6)
+        overrides = {}
 
         cfg_path = os.path.join(folder, "theme.json")
         if os.path.exists(cfg_path):
@@ -249,6 +360,9 @@ class AvatarPack:
             theme.glow_strength = float(cfg.get("glow_strength", theme.glow_strength))
             theme.outline_w = float(cfg.get("outline_w", theme.outline_w))
             theme.draw_face = bool(cfg.get("draw_face", theme.draw_face))
+            for part_name, part_cfg in (cfg.get("parts") or {}).items():
+                if isinstance(part_cfg, dict):
+                    overrides[part_name.lower()] = part_cfg
 
         parts = {}
         for fname in sorted(os.listdir(folder)):
@@ -263,7 +377,11 @@ class AvatarPack:
             if img.ndim == 3 and img.shape[2] == 4:
                 parts[stem.lower()] = img
 
-        return cls(name=theme.name, theme=theme, parts=parts)
+        # Base deducida del alfa, y encima lo que declare theme.json.
+        specs = {name: auto_spec(img).merged(overrides.get(name))
+                 for name, img in parts.items()}
+
+        return cls(name=theme.name, theme=theme, parts=parts, specs=specs)
 
     def part(self, name, side=None):
         """Busca primero la variante del lado y si no existe cae a la base."""
@@ -272,6 +390,14 @@ class AvatarPack:
             if img is not None:
                 return img
         return self.parts.get(name)
+
+    def spec(self, name, side=None):
+        """La configuracion de articulaciones de esa parte, o la de por defecto."""
+        if side:
+            found = self.specs.get(name + "_" + side.lower())
+            if found is not None:
+                return found
+        return self.specs.get(name, DEFAULT_SPEC)
 
 
 def load_packs(packs_dir):
@@ -322,7 +448,8 @@ class AvatarRenderer:
         img = pack.part(name, side)
         p0, p1 = sk.pts[a], sk.pts[b]
         if img is not None:
-            warp_on_bone(canvas, img, p0, p1)
+            spec = pack.spec(name, side)
+            warp_on_bone(canvas, img, p0, p1, spec.a, spec.b, spec.width)
             return
 
         w0, w1 = PROPORTIONS[name]
@@ -347,8 +474,9 @@ class AvatarRenderer:
                        s["elbow"], s["wrist"], theme.accent, side)
             hand_img = pack.part("hand", side)
             if hand_img is not None:
+                spec = pack.spec("hand", side)
                 warp_centered(canvas, hand_img, sk.pts[s["wrist"]], sk.torso_angle + 90,
-                              HAND_R * sk.scale * 2.4)
+                              HAND_R * sk.scale * 2.4 * spec.size, spec.anchor)
             else:
                 blob(canvas, sk.pts[s["wrist"]], HAND_R * sk.scale,
                      _rgba(theme.skin), _rgba(theme.outline), ow)
@@ -364,7 +492,9 @@ class AvatarRenderer:
             foot_img = pack.part("foot", side)
             if self._vis(sk, s["foot"]):
                 if foot_img is not None:
-                    warp_on_bone(canvas, foot_img, sk.pts[s["ankle"]], sk.pts[s["foot"]])
+                    fs = pack.spec("foot", side)
+                    warp_on_bone(canvas, foot_img, sk.pts[s["ankle"]], sk.pts[s["foot"]],
+                                 fs.a, fs.b, fs.width)
                 else:
                     limb(canvas, sk.pts[s["ankle"]], sk.pts[s["foot"]],
                          FOOT_R * sk.scale, FOOT_R * sk.scale * 0.72,
@@ -376,8 +506,9 @@ class AvatarRenderer:
     def _torso(self, canvas, sk, pack, theme, ow):
         img = pack.part("torso")
         if img is not None:
+            spec = pack.spec("torso")
             warp_on_bone(canvas, img, sk.shoulder_c, sk.hip_c,
-                         width_gain=max(sk.shoulder_w, 1.0) / max(sk.torso_len, 1.0))
+                         spec.a, spec.b, spec.width)
         else:
             quad = sk.torso_quad()
             center = quad.mean(axis=0)
@@ -395,22 +526,31 @@ class AvatarRenderer:
                 for corner in pts:
                     cv2.circle(canvas, _pt(corner), max(int(margin), 1), color, -1, cv2.LINE_AA)
 
-        # Cuello: une el torso con la cabeza.
-        neck_end = sk.head_c + (sk.shoulder_c - sk.head_c) * 0.45
-        limb(canvas, sk.shoulder_c, neck_end,
+        # Cuello: va del torso hasta el centro de la cabeza, no hasta su
+        # borde. Asi la cabeza siempre le tapa la punta y solo queda a la
+        # vista el tramo entre los hombros y la barbilla. Antes terminaba
+        # antes de llegar y quedaba un cuello largo de jirafa.
+        limb(canvas, sk.shoulder_c, sk.head_c,
              PROPORTIONS["neck"][0] * sk.scale, PROPORTIONS["neck"][1] * sk.scale,
              _rgba(theme.skin), _rgba(theme.outline), ow)
 
     def _head(self, canvas, sk, pack, theme, ow):
         img = pack.part("head")
-        if img is not None:
-            warp_centered(canvas, img, sk.head_c, sk.head_angle, sk.head_r * 2.6)
-            return
-
         r = sk.head_r
-        blob(canvas, sk.head_c, r, _rgba(theme.skin), _rgba(theme.outline), ow)
-        if not theme.draw_face:
-            return
+
+        if img is not None:
+            spec = pack.spec("head")
+            warp_centered(canvas, img, sk.head_c, sk.head_angle,
+                          r * 2.6 * spec.size, spec.anchor)
+            # Si el pack dibuja la cabeza pero deja la cara libre, se le
+            # pintan los ojos encima. Son los ojos los que hacen que la
+            # gente sienta que el avatar esta vivo y la mira.
+            if not theme.draw_face:
+                return
+        else:
+            blob(canvas, sk.head_c, r, _rgba(theme.skin), _rgba(theme.outline), ow)
+            if not theme.draw_face:
+                return
 
         a = math.radians(sk.head_angle)
         ux = np.array([math.cos(a), math.sin(a)], np.float32)     # linea de orejas

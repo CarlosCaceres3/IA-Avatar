@@ -1,0 +1,15 @@
+{
+  "name": "Futbolista Azul",
+  "skin": "#8D5524",
+  "suit": "#1E4FD8",
+  "accent": "#1E4FD8",
+  "outline": "#2A2520",
+  "glow": "#1E4FD8",
+  "glow_strength": 0.35,
+  "draw_face": true,
+  "parts": {
+    "head": {
+      "size": 1.3
+    }
+  }
+}

@@ -83,52 +83,93 @@ webcam ──► MediaPipe PoseLandmarker ──► 33 puntos del cuerpo
 
 ---
 
-## Poner sus propias imágenes
+## Avatares
 
-Cada avatar es una carpeta en `assets/packs/`. Ya hay un ejemplo generado:
+Cada avatar es una carpeta en `assets/packs/`. Se cambian en vivo con `A` y `D`.
+
+### Futbolista configurable
 
 ```bash
-python tools/crear_pack_ejemplo.py
+python tools/crear_pack_futbolista.py --nombre "Futbolista Verde" \
+    --camiseta "#1B7F3B" --pantaloneta "#FFFFFF" --medias "#1B7F3B" --numero 9
 ```
 
-Crea `assets/packs/ejemplo_imagenes/` con un PNG por parte del cuerpo.
-**Reemplacen esos archivos por sus propios dibujos manteniendo el nombre** y el
-avatar pasa a usarlos, sin tocar código.
+Genera un futbolista completo con camiseta, número al pecho, pantaloneta, medias y
+botines en los colores que le pasen. Cada llamada crea una carpeta nueva, así que
+pueden tener varios equipos y alternarlos durante el evento.
 
-Archivos que reconoce (todos opcionales — lo que falte se dibuja con figuras):
+Opciones: `--camiseta --pantaloneta --medias --botines --piel --pelo --numero --nombre`.
+
+### Poner sus propias imágenes
+
+```bash
+python tools/crear_pack_ejemplo.py     # crea un pack de muestra para copiar
+```
+
+**Reemplacen los PNG por sus dibujos manteniendo el nombre** y el avatar los usa,
+sin tocar código. Archivos que reconoce (todos opcionales — lo que falte se dibuja
+con figuras del tema):
 
 ```
 head.png  torso.png  upper_arm.png  forearm.png  thigh.png  shin.png  hand.png  foot.png
 ```
 
-Para usar una pieza distinta en cada lado, agreguen el sufijo: `forearm_l.png`,
-`forearm_r.png`.
+Para una pieza distinta en cada lado: `forearm_l.png`, `forearm_r.png`.
 
-**Convención de cada PNG:**
+**Lo único que hay que respetar:**
 
-- Fondo transparente (canal alfa).
-- Para los huesos (brazos, piernas, torso): el eje largo va de **arriba**
-  (articulación inicial) hacia **abajo** (articulación final), centrado
-  horizontalmente. La imagen se rota y escala sobre el hueso.
-- Para `head.png` y `hand.png`: la pieza va centrada, mirando al frente.
+- Fondo transparente (canal alfa de verdad, no blanco).
+- En los huesos (brazos, piernas, torso), el dibujo va **de arriba hacia abajo**:
+  arriba la articulación que queda del lado del cuerpo, abajo la del extremo.
+- Mínimo unos 200 px de alto por pieza, o se verá pixelado en el proyector.
 
-Los colores se definen en `theme.json` dentro de la misma carpeta:
+**No hace falta recortar al píxel.** Las articulaciones se deducen solas del canal
+alfa: el programa mide dónde empieza y termina el dibujo dentro del PNG e ignora el
+margen transparente. Pueden exportar con el espacio que les quede cómodo.
+
+Revisen el resultado sin pararse frente a la cámara:
+
+```bash
+python tools/probar_pack.py mi_personaje
+```
+
+Avisa qué partes faltan, detecta los errores típicos (sin transparencia, imagen muy
+chica, pieza mal orientada) y genera `pack_revision.png` con el avatar en 4 poses.
+
+### theme.json
+
+Los colores y ajustes van en `theme.json` dentro de la carpeta del pack:
 
 ```json
 {
-  "name": "Robot PNG",
-  "skin": "#8C8882",
-  "suit": "#8C8882",
-  "accent": "#F0822B",
-  "outline": "#3C3734",
-  "glow": "#2882F0",
-  "glow_strength": 0.5,
-  "draw_face": false
+  "name": "Mi personaje",
+  "skin": "#C68642",
+  "suit": "#D32F2F",
+  "accent": "#D32F2F",
+  "outline": "#2A2520",
+  "glow": "#D32F2F",
+  "glow_strength": 0.35,
+  "draw_face": true,
+  "parts": {
+    "head": { "size": 1.30 }
+  }
 }
 ```
 
-`skin` cubre las partes que no tengan PNG (por ejemplo el cuello), así que conviene
-ponerla en el tono del pack.
+- `skin` cubre las partes sin PNG (por ejemplo el cuello): pónganla en el tono del pack.
+- `draw_face: true` hace que el programa pinte los ojos **encima** de `head.png`, y
+  esos ojos siguen a la persona. Si su dibujo ya trae cara, pónganlo en `false`.
+- `parts` es opcional y sirve para retocar: `size` agranda la pieza, `width` la
+  ensancha, y `a` / `b` / `anchor` permiten fijar las articulaciones a mano si la
+  detección automática no acierta. Lo que declaren se combina con lo detectado.
+
+### Sobre usar personas reales
+
+Si piensan usar la cara de alguien conocido, tengan en cuenta que eso toca sus
+derechos de imagen y, si la foto es de prensa, también los derechos del fotógrafo.
+Alternativas que funcionan igual de bien para un stand: personajes propios, el
+futbolista configurable de arriba, personajes de dominio público, o la mascota de
+la marca si tienen una.
 
 **Fondos:** cualquier `.jpg` o `.png` que dejen en `assets/backgrounds/` aparece en
 el ciclo de la tecla `F`.

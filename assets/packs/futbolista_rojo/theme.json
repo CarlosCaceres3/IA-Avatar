@@ -1,0 +1,15 @@
+{
+  "name": "Futbolista Rojo",
+  "skin": "#C68642",
+  "suit": "#D32F2F",
+  "accent": "#D32F2F",
+  "outline": "#2A2520",
+  "glow": "#D32F2F",
+  "glow_strength": 0.35,
+  "draw_face": true,
+  "parts": {
+    "head": {
+      "size": 1.3
+    }
+  }
+}

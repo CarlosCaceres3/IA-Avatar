@@ -92,6 +92,10 @@ def main():
 
     # 'skin' cubre las partes que no tienen PNG (aqui el cuello): conviene
     # ponerla en el tono del pack para que no desentone.
+    #
+    # 'parts' es opcional: las articulaciones se deducen solas del canal
+    # alfa. Se declara solo para ajustar. Aqui se agranda la cabeza porque
+    # el robot queda mejor con la cabeza grande, estilo caricatura.
     theme = {
         "name": "Robot PNG",
         "skin": "#8C8882",
@@ -101,6 +105,9 @@ def main():
         "glow": "#2882F0",
         "glow_strength": 0.5,
         "draw_face": False,
+        "parts": {
+            "head": {"size": 1.25},
+        },
     }
     with open(os.path.join(OUT, "theme.json"), "w", encoding="utf-8") as fh:
         json.dump(theme, fh, indent=2, ensure_ascii=False)
