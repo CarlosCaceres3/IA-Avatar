@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+import shading
 from skeleton import (
     L_ANKLE, L_EAR, L_ELBOW, L_FOOT, L_HIP, L_INDEX, L_KNEE, L_SHOULDER, L_WRIST,
     NOSE, R_ANKLE, R_EAR, R_ELBOW, R_FOOT, R_HIP, R_INDEX, R_KNEE, R_SHOULDER,
@@ -57,6 +58,8 @@ class Theme:
     glow_strength: float = 0.0
     outline_w: float = 0.022   # fraccion de la escala
     draw_face: bool = True
+    volume: bool = False       # sombrear como cilindros y esferas (3D)
+    rim: tuple = (255, 255, 255)   # color de la luz de contorno
 
 
 THEMES = [
@@ -86,6 +89,33 @@ THEMES = [
         name="Oro",
         suit=(40, 140, 220), skin=(120, 200, 245), accent=(90, 215, 250),
         outline=(20, 45, 80), glow=(60, 180, 240), glow_strength=0.6,
+    ),
+
+    # Temas con volumen: mismas siluetas, pero sombreadas como cilindros y
+    # esferas. Es lo que separa un muneco de palos de un personaje.
+    Theme(
+        name="3D Azul",
+        suit=(190, 105, 45), skin=(150, 190, 225), accent=(225, 165, 80),
+        outline=(40, 28, 20), glow=(200, 120, 50), glow_strength=0.30,
+        outline_w=0.016, volume=True, rim=(255, 225, 180),
+    ),
+    Theme(
+        name="3D Heroe",
+        suit=(55, 55, 205), skin=(150, 190, 235), accent=(60, 185, 240),
+        outline=(25, 20, 45), glow=(70, 90, 225), glow_strength=0.35,
+        outline_w=0.016, volume=True, rim=(220, 240, 255),
+    ),
+    Theme(
+        name="3D Robot",
+        suit=(165, 160, 150), skin=(200, 198, 195), accent=(50, 140, 245),
+        outline=(38, 34, 30), glow=(60, 150, 245), glow_strength=0.30,
+        outline_w=0.016, volume=True, rim=(235, 245, 255),
+    ),
+    Theme(
+        name="3D Oro",
+        suit=(45, 150, 230), skin=(150, 205, 240), accent=(90, 200, 250),
+        outline=(18, 45, 78), glow=(60, 175, 240), glow_strength=0.45,
+        outline_w=0.016, volume=True, rim=(190, 240, 255),
     ),
 ]
 
@@ -119,17 +149,27 @@ def tapered(canvas, p0, p1, w0, w1, color):
     cv2.circle(canvas, _pt(p1), max(int(w1), 1), color, -1, cv2.LINE_AA)
 
 
-def limb(canvas, p0, p1, w0, w1, fill, outline, ow):
-    """Extremidad con contorno: se pinta primero el borde, luego el relleno."""
+def limb(canvas, p0, p1, w0, w1, fill, outline, ow, theme=None):
+    """Extremidad con contorno: se pinta primero el borde, luego el relleno.
+
+    Con el tema en modo volumen, el relleno liso se cambia por un cilindro
+    sombreado: misma silueta, pero se lee como un cuerpo y no como un palo.
+    """
     if ow > 0.4:
         tapered(canvas, p0, p1, w0 + ow, w1 + ow, outline)
-    tapered(canvas, p0, p1, w0, w1, fill)
+    if theme is not None and theme.volume:
+        shading.capsule(canvas, p0, p1, w0, w1, fill[:3], theme.rim)
+    else:
+        tapered(canvas, p0, p1, w0, w1, fill)
 
 
-def blob(canvas, center, radius, fill, outline, ow):
+def blob(canvas, center, radius, fill, outline, ow, theme=None):
     if ow > 0.4:
         cv2.circle(canvas, _pt(center), max(int(radius + ow), 1), outline, -1, cv2.LINE_AA)
-    cv2.circle(canvas, _pt(center), max(int(radius), 1), fill, -1, cv2.LINE_AA)
+    if theme is not None and theme.volume:
+        shading.sphere(canvas, center, radius, fill[:3], theme.rim)
+    else:
+        cv2.circle(canvas, _pt(center), max(int(radius), 1), fill, -1, cv2.LINE_AA)
 
 
 def warp_rgba(canvas, rgba, M):
@@ -432,6 +472,13 @@ class AvatarRenderer:
         near = "L" if sk.left_is_near else "R"
         far = "R" if sk.left_is_near else "L"
 
+        if theme.volume:
+            # La sombra va primero, debajo de todo: sin ella una figura con
+            # volumen igual parece flotar sobre el fondo.
+            pies = [sk.pts[i] if sk.vis[i] > 0.35 else None
+                    for i in (L_ANKLE, R_ANKLE, L_FOOT, R_FOOT)]
+            shading.ground_shadow(canvas, pies, sk.scale)
+
         # Orden de atras hacia adelante para que el cuerpo tape lo correcto.
         self._leg(canvas, sk, pack, theme, ow, far)
         self._arm(canvas, sk, pack, theme, ow, far)
@@ -462,7 +509,7 @@ class AvatarRenderer:
         cap = max(length * FORESHORTEN_CAP, 2.0)
         w0, w1 = min(w0, cap), min(w1, cap)
 
-        limb(canvas, p0, p1, w0, w1, _rgba(fill), _rgba(theme.outline), ow)
+        limb(canvas, p0, p1, w0, w1, _rgba(fill), _rgba(theme.outline), ow, theme)
 
     def _arm(self, canvas, sk, pack, theme, ow, side):
         s = SIDES[side]
@@ -479,7 +526,7 @@ class AvatarRenderer:
                               HAND_R * sk.scale * 2.4 * spec.size, spec.anchor)
             else:
                 blob(canvas, sk.pts[s["wrist"]], HAND_R * sk.scale,
-                     _rgba(theme.skin), _rgba(theme.outline), ow)
+                     _rgba(theme.skin), _rgba(theme.outline), ow, theme)
 
     def _leg(self, canvas, sk, pack, theme, ow, side):
         s = SIDES[side]
@@ -498,10 +545,10 @@ class AvatarRenderer:
                 else:
                     limb(canvas, sk.pts[s["ankle"]], sk.pts[s["foot"]],
                          FOOT_R * sk.scale, FOOT_R * sk.scale * 0.72,
-                         _rgba(theme.outline), _rgba(theme.outline), 0)
+                         _rgba(theme.outline), _rgba(theme.outline), 0, theme)
             elif foot_img is None:
                 blob(canvas, sk.pts[s["ankle"]], FOOT_R * sk.scale,
-                     _rgba(theme.outline), _rgba(theme.outline), 0)
+                     _rgba(theme.outline), _rgba(theme.outline), 0, theme)
 
     def _torso(self, canvas, sk, pack, theme, ow):
         img = pack.part("torso")
@@ -509,6 +556,18 @@ class AvatarRenderer:
             spec = pack.spec("torso")
             warp_on_bone(canvas, img, sk.shoulder_c, sk.hip_c,
                          spec.a, spec.b, spec.width)
+        elif theme.volume:
+            # En modo volumen el torso se trata como una capsula ancha entre
+            # hombros y cadera. Un poligono plano al lado de extremidades
+            # sombreadas se nota de inmediato como un cartón pegado.
+            quad = sk.torso_quad()
+            half_top = float(np.linalg.norm(quad[1] - quad[0])) * 0.5
+            half_bot = float(np.linalg.norm(quad[2] - quad[3])) * 0.5
+            if ow > 0.4:
+                tapered(canvas, sk.shoulder_c, sk.hip_c,
+                        half_top + ow, half_bot + ow, _rgba(theme.outline))
+            shading.capsule(canvas, sk.shoulder_c, sk.hip_c,
+                            half_top, half_bot, theme.suit, theme.rim)
         else:
             quad = sk.torso_quad()
             center = quad.mean(axis=0)
@@ -532,7 +591,7 @@ class AvatarRenderer:
         # antes de llegar y quedaba un cuello largo de jirafa.
         limb(canvas, sk.shoulder_c, sk.head_c,
              PROPORTIONS["neck"][0] * sk.scale, PROPORTIONS["neck"][1] * sk.scale,
-             _rgba(theme.skin), _rgba(theme.outline), ow)
+             _rgba(theme.skin), _rgba(theme.outline), ow, theme)
 
     def _head(self, canvas, sk, pack, theme, ow, expr=None):
         img = pack.part("head")
@@ -548,7 +607,7 @@ class AvatarRenderer:
             if not theme.draw_face:
                 return
         else:
-            blob(canvas, sk.head_c, r, _rgba(theme.skin), _rgba(theme.outline), ow)
+            blob(canvas, sk.head_c, r, _rgba(theme.skin), _rgba(theme.outline), ow, theme)
             if not theme.draw_face:
                 return
 

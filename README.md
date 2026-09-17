@@ -110,6 +110,29 @@ pueden tener varios equipos y alternarlos durante el evento.
 
 Opciones: `--camiseta --pantaloneta --medias --botines --piel --pelo --numero --nombre`.
 
+### Avatares con volumen (3D)
+
+Los temas que empiezan con **3D** (`3D Azul`, `3D Heroe`, `3D Robot`, `3D Oro`) no
+se pintan con colores lisos: cada extremidad se sombrea como un **cilindro** y la
+cabeza como una **esfera**, con luz difusa, brillo especular, luz de contorno y
+sombra de contacto en el piso. Es el mismo esqueleto de siempre — lo que cambia es
+cómo se pinta cada parte.
+
+Se cambian con `A` / `D` como cualquier otro avatar.
+
+Para crear uno propio, basta agregar un `Theme` en `src/avatar.py` con
+`volume=True`, elegir los colores y el color de la luz de contorno (`rim`).
+
+**Sobre el costo:** sombrear píxel a píxel cuesta caro. A resolución completa eran
+55 ms por cuadro (18 FPS). Por eso los temas con volumen se dibujan a **0.6 de la
+resolución** y se amplían al componer: el sombreado es suave, así que a distancia de
+proyector no se nota, y baja a 22 ms (46 FPS). Se puede forzar con:
+
+```bash
+python avatar_cam.py --calidad 1.0     # máxima calidad, más lento
+python avatar_cam.py --calidad 0.5     # más rápido, un poco más suave
+```
+
 ### Poner sus propias imágenes
 
 ```bash

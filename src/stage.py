@@ -143,23 +143,45 @@ def composite(background, avatar_rgba, glow_color=(255, 190, 40), glow_strength=
     cuadro en 720p, que por si sola dejaba la demo en 13 FPS.
 
     roi limita el trabajo a la caja donde realmente hay avatar. El resto
-    del cuadro es fondo puro y no necesita mezclarse.
+    del cuadro es fondo puro y no necesita mezclarse. Va en coordenadas
+    del lienzo del avatar.
+
+    El avatar puede venir en un lienzo mas chico que el fondo: los temas
+    con volumen se dibujan a media resolucion porque el sombreado es suave
+    y a esa escala cuesta cuatro veces menos. Aqui se amplia, y solo dentro
+    del roi para no pagar el reescalado del cuadro entero.
     """
     h, w = background.shape[:2]
+    ah, aw = avatar_rgba.shape[:2]
+    q = aw / float(w)
 
     if out is None:
         out = background.copy()
     else:
         np.copyto(out, background)
 
-    x0, y0, x1, y1 = roi if roi else (0, 0, w, h)
-    x0, y0 = max(int(x0), 0), max(int(y0), 0)
-    x1, y1 = min(int(x1), w), min(int(y1), h)
+    if roi:
+        ax0, ay0, ax1, ay1 = roi
+        x0, y0 = int(ax0 / q), int(ay0 / q)
+        x1, y1 = int(np.ceil(ax1 / q)), int(np.ceil(ay1 / q))
+    else:
+        x0, y0, x1, y1 = 0, 0, w, h
+    x0, y0 = max(x0, 0), max(y0, 0)
+    x1, y1 = min(x1, w), min(y1, h)
     if x1 - x0 < 2 or y1 - y0 < 2:
         return out
 
-    alpha = avatar_rgba[y0:y1, x0:x1, 3]
-    rgb = avatar_rgba[y0:y1, x0:x1, :3]
+    if abs(q - 1.0) < 1e-6:
+        sub = avatar_rgba[y0:y1, x0:x1]
+    else:
+        sy0, sx0 = max(int(y0 * q), 0), max(int(x0 * q), 0)
+        sy1 = min(max(int(np.ceil(y1 * q)), sy0 + 1), ah)
+        sx1 = min(max(int(np.ceil(x1 * q)), sx0 + 1), aw)
+        sub = cv2.resize(avatar_rgba[sy0:sy1, sx0:sx1], (x1 - x0, y1 - y0),
+                         interpolation=cv2.INTER_LINEAR)
+
+    alpha = np.ascontiguousarray(sub[:, :, 3])
+    rgb = np.ascontiguousarray(sub[:, :, :3])
     dst = out[y0:y1, x0:x1]
     rh, rw = dst.shape[:2]
 

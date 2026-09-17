@@ -132,6 +132,9 @@ def parse_args():
                    default=os.path.join(ROOT, "models", "face_landmarker.task"))
     p.add_argument("--no-face", action="store_true",
                    help="no seguir la cara (ahorra CPU si hace falta)")
+    p.add_argument("--calidad", type=float, default=0.0,
+                   help="resolucion de dibujo del avatar (0 = automatica). "
+                        "0.6 por defecto en los temas con volumen, 1.0 en los planos.")
     p.add_argument("--no-virtualcam", action="store_true", help="no abrir la camara virtual")
     p.add_argument("--fullscreen", action="store_true", help="arrancar en pantalla completa")
     p.add_argument("--avatar", type=int, default=0, help="indice del avatar inicial")
@@ -198,6 +201,7 @@ def main():
     # Un solo bufer de salida reutilizado: evita pedirle 2.7 MB al sistema
     # operativo treinta veces por segundo.
     screen = np.empty((height, width, 3), dtype=np.uint8)
+    render_q = 0.0             # resolucion de dibujo en uso
 
     mirror = True
     show_hud = True
@@ -257,9 +261,25 @@ def main():
             background = backgrounds.get(frame)
 
             if visible and landmarks is not None:
-                skel = sk.from_landmarks(landmarks, width, height,
+                # Los temas con volumen se dibujan mas chico y se amplian al
+                # componer: el sombreado es suave y a media resolucion cuesta
+                # la cuarta parte, sin diferencia visible en un proyector.
+                q = args.calidad if args.calidad > 0 else (0.6 if pack.theme.volume else 1.0)
+                if q != render_q:
+                    # Cambiar de escala mueve todos los puntos: los filtros
+                    # lo verian como un salto de la persona.
+                    smoother.reset()
+                    body.reset()
+                    render_q = q
+                rw = max(int(width * q), 32)
+                rh = max(int(height * q), 32)
+
+                skel = sk.from_landmarks(landmarks, rw, rh,
                                          smoother=smoother, fps=fps_avg, state=body)
-                last_head = (skel.head_c, skel.head_r)
+                # El recorte de cara se hace sobre el cuadro COMPLETO, pero
+                # el esqueleto puede estar en coordenadas reducidas: hay que
+                # devolver la cabeza a la escala del cuadro.
+                last_head = (skel.head_c / q, skel.head_r / q)
                 expr = face.expression if face is not None else None
                 canvas = renderer.render(skel, pack, expr)
                 if show_bones:
