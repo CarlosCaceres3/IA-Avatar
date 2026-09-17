@@ -11,6 +11,9 @@ asi que no frena el bucle principal.
 
 from dataclasses import dataclass
 
+import cv2
+import numpy as np
+
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
@@ -20,6 +23,46 @@ from mediapipe.tasks.python import vision
 # persona ve a su izquierda en pantalla es el que hay que mover. Si en la
 # prueba en vivo los guiños salen cambiados de lado, invertir esto.
 SWAP_EYES = False
+
+
+def head_crop(frame, head_c, head_r, size=256, pad=2.3):
+    """Recorta un cuadrado alrededor de la cabeza y lo lleva a 'size' px.
+
+    Es la diferencia entre que el seguimiento facial funcione o no. Al
+    detector se le daba el cuadro entero reducido a 480 px de ancho: a dos
+    metros de distancia la cara ocupaba ahi unos 40 px, muy poco para sacar
+    parpados y boca. El detector de cuerpo aguanta esa resolucion, el de
+    cara no.
+
+    Recortando la cabeza y escalandola a 256 px, el detector recibe la cara
+    grande sin importar a que distancia este la persona.
+
+    Como de la cara solo se usan los blendshapes (valores de expresion) y
+    no las coordenadas, no hace falta mapear nada de vuelta al cuadro.
+    """
+    h, w = frame.shape[:2]
+    half = max(head_r * pad, 24.0)
+    cx, cy = float(head_c[0]), float(head_c[1])
+
+    # El lado se calcula una sola vez y los dos extremos salen de el. Si se
+    # redondean X e Y por separado, el recorte puede quedar de 388x371 en
+    # vez de cuadrado y el pegado al lienzo revienta.
+    lado = max(int(round(half * 2.0)), 8)
+    x0, y0 = int(round(cx - half)), int(round(cy - half))
+    x1, y1 = x0 + lado, y0 + lado
+
+    # Si la cabeza queda parcialmente fuera del cuadro, se rellena en negro
+    # en vez de desplazar el recorte: mover el centro deformaria la cara.
+    sx0, sy0 = max(x0, 0), max(y0, 0)
+    sx1, sy1 = min(x1, w), min(y1, h)
+    if sx1 - sx0 < 8 or sy1 - sy0 < 8:
+        return None
+
+    lienzo = np.zeros((lado, lado, 3), dtype=frame.dtype)
+    lienzo[sy0 - y0:sy1 - y0, sx0 - x0:sx1 - x0] = frame[sy0:sy1, sx0:sx1]
+
+    interp = cv2.INTER_AREA if lado > size else cv2.INTER_LINEAR
+    return cv2.resize(lienzo, (size, size), interpolation=interp)
 
 
 @dataclass

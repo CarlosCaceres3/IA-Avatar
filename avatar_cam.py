@@ -41,7 +41,7 @@ import avatar as av                                      # noqa: E402
 import skeleton as sk                                    # noqa: E402
 import stage                                             # noqa: E402
 from camera_out import VirtualCamera                     # noqa: E402
-from face import FaceTracker                             # noqa: E402
+from face import FaceTracker, head_crop                  # noqa: E402
 from smoothing import Hysteresis, OneEuroFilter          # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -203,6 +203,7 @@ def main():
     show_hud = True
     show_bones = False
     show_face_debug = False
+    last_head = None           # cabeza del cuadro anterior, para el recorte
     fps_avg = float(args.fps)
     t_prev = time.perf_counter()
     t_start = t_prev
@@ -229,9 +230,20 @@ def main():
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             landmarker.detect_async(mp_image, timestamp_ms)
             if face is not None:
-                # El mismo cuadro alimenta los dos detectores; cada uno
-                # corre en su propio hilo y no se esperan entre si.
-                face.submit(mp_image, timestamp_ms)
+                # A la cara NO se le manda el cuadro reducido sino un
+                # recorte de la cabeza a resolucion completa: a dos metros
+                # la cara mide ~40 px en el cuadro chico y el detector no
+                # saca nada de ahi. Se usa la cabeza del cuadro anterior,
+                # que para seguir una cabeza sobra.
+                recorte = None
+                if last_head is not None:
+                    recorte = head_crop(frame, last_head[0], last_head[1])
+                if recorte is None:
+                    recorte = small
+                face.submit(
+                    mp.Image(image_format=mp.ImageFormat.SRGB,
+                             data=cv2.cvtColor(recorte, cv2.COLOR_BGR2RGB)),
+                    timestamp_ms)
 
             now = time.perf_counter()
             dt = now - t_prev
@@ -247,6 +259,7 @@ def main():
             if visible and landmarks is not None:
                 skel = sk.from_landmarks(landmarks, width, height,
                                          smoother=smoother, fps=fps_avg, state=body)
+                last_head = (skel.head_c, skel.head_r)
                 expr = face.expression if face is not None else None
                 canvas = renderer.render(skel, pack, expr)
                 if show_bones:
@@ -257,6 +270,7 @@ def main():
             else:
                 smoother.reset()
                 body.reset()      # la proxima persona puede tener otro tamano
+                last_head = None
                 if face is not None:
                     face.reset()
                 np.copyto(screen, background)
