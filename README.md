@@ -8,6 +8,10 @@ Zoom, Meet, OBS o el proyector la tomen como si fuera una webcam más.
 
 Todo corre **local, en CPU y sin internet** una vez descargado el modelo.
 
+> ¿Buscando un avatar **3D estilo anime** en vez del muñeco 2D? Ese es otro stack
+> (VRoid + Warudo) y está documentado en [AVATAR_3D.md](AVATAR_3D.md). Esta app
+> sigue sirviendo como plan B: arranca en segundos y no depende de GPU ni de Steam.
+
 ---
 
 ## Instalación
