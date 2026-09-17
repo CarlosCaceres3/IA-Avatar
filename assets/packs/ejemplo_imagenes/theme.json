@@ -1,0 +1,10 @@
+{
+  "name": "Robot PNG",
+  "skin": "#8C8882",
+  "suit": "#8C8882",
+  "accent": "#F0822B",
+  "outline": "#3C3734",
+  "glow": "#2882F0",
+  "glow_strength": 0.5,
+  "draw_face": false
+}

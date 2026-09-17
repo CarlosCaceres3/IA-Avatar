@@ -1,0 +1,283 @@
+# Avatar IA en vivo — demo para stand
+
+Una persona se para frente a la cámara y en pantalla aparece un avatar articulado
+que copia sus movimientos en tiempo real. La persona real no se ve: solo el avatar
+sobre el fondo elegido. La salida se puede enviar a una **cámara virtual** para que
+Zoom, Meet, OBS o el proyector la tomen como si fuera una webcam más.
+
+Todo corre **local, en CPU y sin internet** una vez descargado el modelo.
+
+---
+
+## Instalación
+
+Requiere Python 3.9–3.13.
+
+```bash
+pip install -r requirements.txt
+```
+
+El modelo de pose (9 MB) no viene en el repositorio, se descarga aparte:
+
+```bash
+python tools/descargar_modelo.py
+```
+
+## Arranque rápido
+
+```bash
+python avatar_cam.py
+```
+
+O doble clic en `INICIAR.bat` (arranca en pantalla completa).
+
+Antes del evento, corre el chequeo:
+
+```bash
+python tools/diagnostico.py
+```
+
+Verifica paquetes, modelo, cámaras, FPS reales y cámara virtual, y guarda un cuadro
+de muestra en `diagnostico.png`.
+
+---
+
+## Teclas
+
+| Tecla | Acción |
+|-------|--------|
+| `A` / `D` | Avatar anterior / siguiente |
+| `F` | Cambiar fondo |
+| `G` | Espejo on/off |
+| `E` | Mostrar el esqueleto detectado (depuración) |
+| `H` | Ocultar/mostrar los datos en pantalla |
+| `V` | Activar/pausar la cámara virtual |
+| `P` | Guardar una foto PNG en `capturas/` |
+| `TAB` | Pantalla completa |
+| `Q` o `ESC` | Salir |
+
+---
+
+## Cómo funciona
+
+```
+webcam ──► MediaPipe PoseLandmarker ──► 33 puntos del cuerpo
+                                              │
+                                     filtro One Euro (quita el temblor)
+                                              │
+                              renderizador: dibuja el avatar sobre los huesos
+                                              │
+                          fondo + halo de luz ──► ventana + cámara virtual
+```
+
+- **`src/skeleton.py`** convierte los 33 puntos normalizados de MediaPipe en
+  píxeles y calcula lo derivado: centro de hombros y cadera, radio y giro de la
+  cabeza, escala del cuerpo y qué lado está más cerca de la cámara.
+- **`src/smoothing.py`** aplica un filtro One Euro. Sin él, el avatar vibra 1–3 px
+  aunque la persona esté quieta, y en proyección grande eso se nota mucho.
+- **`src/avatar.py`** dibuja el cuerpo de atrás hacia adelante (pierna lejana,
+  brazo lejano, torso, pierna cercana, brazo cercano, cabeza) para que las partes
+  se tapen en el orden correcto.
+- **`src/stage.py`** genera el fondo, pega el avatar y le agrega el halo.
+- **`src/camera_out.py`** envía el resultado a la cámara virtual.
+
+---
+
+## Poner sus propias imágenes
+
+Cada avatar es una carpeta en `assets/packs/`. Ya hay un ejemplo generado:
+
+```bash
+python tools/crear_pack_ejemplo.py
+```
+
+Crea `assets/packs/ejemplo_imagenes/` con un PNG por parte del cuerpo.
+**Reemplacen esos archivos por sus propios dibujos manteniendo el nombre** y el
+avatar pasa a usarlos, sin tocar código.
+
+Archivos que reconoce (todos opcionales — lo que falte se dibuja con figuras):
+
+```
+head.png  torso.png  upper_arm.png  forearm.png  thigh.png  shin.png  hand.png  foot.png
+```
+
+Para usar una pieza distinta en cada lado, agreguen el sufijo: `forearm_l.png`,
+`forearm_r.png`.
+
+**Convención de cada PNG:**
+
+- Fondo transparente (canal alfa).
+- Para los huesos (brazos, piernas, torso): el eje largo va de **arriba**
+  (articulación inicial) hacia **abajo** (articulación final), centrado
+  horizontalmente. La imagen se rota y escala sobre el hueso.
+- Para `head.png` y `hand.png`: la pieza va centrada, mirando al frente.
+
+Los colores se definen en `theme.json` dentro de la misma carpeta:
+
+```json
+{
+  "name": "Robot PNG",
+  "skin": "#8C8882",
+  "suit": "#8C8882",
+  "accent": "#F0822B",
+  "outline": "#3C3734",
+  "glow": "#2882F0",
+  "glow_strength": 0.5,
+  "draw_face": false
+}
+```
+
+`skin` cubre las partes que no tengan PNG (por ejemplo el cuello), así que conviene
+ponerla en el tono del pack.
+
+**Fondos:** cualquier `.jpg` o `.png` que dejen en `assets/backgrounds/` aparece en
+el ciclo de la tecla `F`.
+
+---
+
+## Cámara virtual (para el proyector, Zoom u OBS)
+
+**Ya está instalada y verificada en este equipo** (OBS Studio 32.2.1). La app detecta
+*OBS Virtual Camera* automáticamente al arrancar y lo confirma en pantalla:
+`VirtualCam: OBS Virtual Camera`. Desde ahí la salida aparece como una webcam más en
+Zoom, Meet, Teams, OBS o cualquier programa que liste cámaras.
+
+Probado leyendo la salida desde otro proceso: llega **1280×720 exacto**, y el
+consumidor puede pedir la resolución que quiera (640×480, 720p o 1080p) — OBS la
+negocia del lado de quien recibe.
+
+Para montarlo en **otro** equipo:
+
+```bash
+winget install --id OBSProject.OBSStudio -e
+```
+
+No hace falta abrir OBS: el instalador registra el driver solo.
+
+Si el driver no está, **la app igual funciona**: muestra la ventana normal y avisa en
+pantalla que la cámara virtual no está disponible. Para el stand, la ventana en
+pantalla completa (`TAB`) puede bastar.
+
+### Cómo se genera el video, técnicamente
+
+La cámara virtual no graba un archivo: publica cada cuadro ya renderizado en un
+dispositivo de video del sistema operativo. El bucle es:
+
+```python
+cam = pyvirtualcam.Camera(width=1280, height=720, fps=30, fmt=PixelFormat.BGR)
+...
+out = stage.composite(background, canvas, ...)   # el cuadro final, un array BGR
+cam.send(out)                                    # se publica como webcam
+cam.sleep_until_next_frame()                     # mantiene el ritmo de 30 FPS
+```
+
+Se usa `PixelFormat.BGR` porque es el formato nativo de OpenCV: así no hay que
+convertir el color en cada cuadro.
+
+Si más adelante quieren **grabar a archivo** en vez de (o además de) transmitir, es
+el mismo array y tres líneas:
+
+```python
+writer = cv2.VideoWriter("clip.mp4", cv2.VideoWriter_fourcc(*"mp4v"), 30, (1280, 720))
+writer.write(out)    # dentro del bucle
+writer.release()     # al terminar
+```
+
+---
+
+## Rendimiento
+
+Medido en este equipo, a 1280×720:
+
+| Etapa | Costo por cuadro |
+|-------|------------------|
+| Detección de pose (hilo aparte) | 10.8 ms |
+| Render del avatar | 2.3 ms |
+| Fondo + halo + composición | 7.3 ms |
+
+El límite real termina siendo **la webcam**, no el procesamiento.
+
+### El detalle de la exposición — y su trampa
+
+Con exposición automática y poca luz, la cámara alarga el tiempo de cada toma y el
+FPS se desploma. Fijarla a mano lo arregla… **pero solo si hay luz suficiente.**
+
+Medido en este equipo, en una sala con poca luz:
+
+| Exposición | FPS | Personas detectadas |
+|------------|-----|---------------------|
+| Automática | 12.4 | 27 de 40 |
+| Manual `-5` | 27.1 | **0 de 40** |
+
+Con `-5` la demo corre al doble de velocidad y **no detecta absolutamente a nadie**,
+porque la imagen queda casi negra y el detector no encuentra un cuerpo ahí. Unos FPS
+altos con cero detecciones se ven en pantalla como una app "fluida" que no reacciona.
+
+Por eso la exposición manual **no viene activada por defecto**. Si el stand está bien
+iluminado, arranquen con:
+
+```bash
+python avatar_cam.py --exposure -5
+```
+
+y comprueben con el diagnóstico que siguen detectando personas:
+
+```bash
+python tools/diagnostico.py --exposure -5
+```
+
+Si la cuenta de "cuadros con persona detectada" baja, falta luz: suban el valor
+(`-4`, `-3`) o quiten la opción. **Prueben esto con la luz real del stand antes de
+abrir**, porque cambia el resultado por completo.
+
+> Ojo: la exposición manual **queda grabada en el driver de la cámara y sobrevive al
+> cierre del programa**. Si no se restaura, la webcam sigue oscura para la siguiente
+> aplicación que la use (y el detector deja de encontrar personas). `avatar_cam.py` y
+> el diagnóstico la devuelven a automático al salir; si alguna vez matan el proceso a
+> la fuerza y la cámara queda oscura, se arregla abriéndola una vez sin `--exposure`.
+
+### Si aún va lento
+
+1. Bajen la resolución: `--width 960 --height 540`.
+2. Usen el modelo liviano:
+   ```bash
+   python tools/descargar_modelo.py --todos
+   python avatar_cam.py --model models/pose_landmarker_lite.task
+   ```
+3. Elijan un avatar sin halo (el tema *Cartoon* tiene `glow_strength` en 0).
+
+---
+
+## Opciones de línea de comandos
+
+```
+--camera N        índice de la webcam (por defecto 0)
+--width / --height  resolución de captura (1280x720)
+--fps N           FPS objetivo (30)
+--exposure V      exposición manual, ej. -5
+--model RUTA      archivo .task del modelo de pose
+--avatar N        avatar inicial
+--no-virtualcam   no abrir la cámara virtual
+--fullscreen      arrancar en pantalla completa
+--max-frames N    salir tras N cuadros (para probar)
+--headless        no abrir ventana (para verificar sin pantalla)
+```
+
+---
+
+## Problemas frecuentes
+
+**"No pude abrir la cámara 0"** — otra aplicación la está usando (Teams, Zoom,
+el navegador). Ciérrala, o prueba `--camera 1`.
+
+**El avatar no aparece** — la persona debe verse de cuerpo completo o al menos de
+medio cuerpo. A menos de metro y medio de la cámara el detector pierde las piernas.
+Presiona `E` para ver si el esqueleto se está detectando.
+
+**El avatar tiembla** — sube el suavizado bajando `min_cutoff` en la creación del
+`OneEuroFilter` en `avatar_cam.py` (por ejemplo de `1.1` a `0.7`). A cambio, el
+movimiento rápido se siente un poco más lento.
+
+**El avatar va con retraso** — es lo contrario: sube `min_cutoff`.
+
+**Se ve todo espejado al revés** — presiona `G`.

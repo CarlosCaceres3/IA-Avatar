@@ -1,0 +1,17 @@
+# El modelo de pose se descarga con tools/descargar_modelo.py (9 MB)
+models/*.task
+
+# Salidas de la app y archivos de prueba temporales
+# (el patron va acotado a proposito: un '_*' suelto tambien
+#  se tragaria src/__init__.py)
+capturas/
+diagnostico.png
+autoprueba.png
+_*.png
+tools/_*.py
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
