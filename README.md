@@ -47,6 +47,40 @@ de muestra en `diagnostico.png`.
 
 ---
 
+## Varias personas a la vez
+
+Por defecto sigue hasta **2 personas**, y le da a cada una **un avatar distinto**
+para que se distingan. Las teclas `A` / `D` cambian los avatares de todas a la vez.
+
+```bash
+python avatar_cam.py --personas 3      # hasta 3 (1 a 4)
+python avatar_cam.py --personas 1      # una sola, lo mas rapido
+```
+
+Cada persona lleva su propio filtro de suavizado, su propio tamaño de cuerpo y su
+propio detector de cara.
+
+**Por qué no basta con pedirle varias poses a MediaPipe:** el detector no garantiza
+devolverlas siempre en el mismo orden, así que asignar el avatar por posición en la
+lista haría que dos personas se intercambiaran los avatares constantemente. En cada
+cuadro las poses se emparejan con las personas ya conocidas **por cercanía**, así que
+quien ya estaba conserva el suyo. Si alguien desaparece un instante, su avatar lo
+espera 12 cuadros antes de liberarse.
+
+**Costo medido** en este equipo, a 720p con un tema con volumen:
+
+| Personas | Por cuadro | FPS teóricos |
+|----------|-----------|--------------|
+| 1 | 13.0 ms | 77 |
+| 2 | 23.4 ms | 43 |
+| 3 | 35.3 ms | 28 |
+
+Con dos va sobrado. **Con tres ya queda por debajo de los 30 FPS de la cámara**: si
+necesitan tres o cuatro, usen un tema plano (los que no empiezan con "3D") o bajen
+la calidad con `--calidad 0.5`.
+
+---
+
 ## Teclas
 
 | Tecla | Acción |

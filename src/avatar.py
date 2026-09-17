@@ -464,8 +464,18 @@ class AvatarRenderer:
     def __init__(self, vis_thr=0.35):
         self.vis_thr = vis_thr
 
-    def render(self, sk, pack, expr=None):
-        canvas = np.zeros((sk.height, sk.width, 4), dtype=np.uint8)
+    def blank(self, width, height):
+        """Lienzo transparente donde dibujar uno o varios avatares."""
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    def render(self, sk, pack, expr=None, canvas=None):
+        """Dibuja un avatar. Con 'canvas' se acumulan varios en el mismo.
+
+        Acumular en un lienzo compartido es lo que permite varias personas
+        sin pagar una composicion por cada una.
+        """
+        if canvas is None:
+            canvas = self.blank(sk.width, sk.height)
         theme = pack.theme
         ow = theme.outline_w * sk.scale
 

@@ -11,7 +11,7 @@ Uso:
     python avatar_cam.py --no-virtualcam
 
 Teclas:
-    A / D      avatar anterior / siguiente
+    A / D      avatar anterior / siguiente (a todas las personas)
     F          fondo siguiente
     G          espejo (on/off)
     E          esqueleto de depuracion (on/off)
@@ -41,8 +41,9 @@ import avatar as av                                      # noqa: E402
 import skeleton as sk                                    # noqa: E402
 import stage                                             # noqa: E402
 from camera_out import VirtualCamera                     # noqa: E402
-from face import FaceTracker, head_crop                  # noqa: E402
-from smoothing import Hysteresis, OneEuroFilter          # noqa: E402
+from face import head_crop                               # noqa: E402
+from people import Crowd                                 # noqa: E402
+from smoothing import Hysteresis                         # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WINDOW = "Avatar IA - Festech"
@@ -66,14 +67,11 @@ class LatestResult:
     """
 
     def __init__(self):
-        self.landmarks = None
+        self.poses = []
         self.stamp = 0.0
 
     def push(self, result, output_image, timestamp_ms):
-        if result.pose_landmarks:
-            self.landmarks = result.pose_landmarks[0]
-        else:
-            self.landmarks = None
+        self.poses = list(result.pose_landmarks) if result.pose_landmarks else []
         self.stamp = timestamp_ms
 
 
@@ -132,6 +130,8 @@ def parse_args():
                    default=os.path.join(ROOT, "models", "face_landmarker.task"))
     p.add_argument("--no-face", action="store_true",
                    help="no seguir la cara (ahorra CPU si hace falta)")
+    p.add_argument("--personas", type=int, default=2,
+                   help="cuantas personas seguir a la vez (1 a 4)")
     p.add_argument("--calidad", type=float, default=0.0,
                    help="resolucion de dibujo del avatar (0 = automatica). "
                         "0.6 por defecto en los temas con volumen, 1.0 en los planos.")
@@ -168,20 +168,25 @@ def main():
     renderer = av.AvatarRenderer()
     backgrounds = stage.Backgrounds(os.path.join(ROOT, "assets", "backgrounds"), (width, height))
 
+    max_people = max(1, min(int(args.personas), 4))
     mailbox = LatestResult()
-    landmarker = build_landmarker(args.model, mailbox)
-    smoother = OneEuroFilter(freq=args.fps, min_cutoff=1.1, beta=0.018)
+    landmarker = build_landmarker(args.model, mailbox, num_poses=max_people)
     presence = Hysteresis(on_frames=2, off_frames=10)
-    body = sk.BodyState()      # memoria del tamano del cuerpo entre cuadros
 
-    face = None
+    face_model = None
     if not args.no_face:
         if os.path.exists(args.face_model):
-            face = FaceTracker(args.face_model)
+            face_model = args.face_model
             print("Seguimiento de cara activo")
         else:
             print("Sin modelo de cara (" + args.face_model + ").")
             print("Descargalo con: python tools/descargar_modelo.py --cara")
+
+    # Cada persona lleva su propio filtro, su tamano de cuerpo y su
+    # detector de cara; el reparto por cercania evita que los avatares se
+    # intercambien cuando MediaPipe cambia el orden de las poses.
+    crowd = Crowd(max_people, args.fps, face_model)
+    print("Siguiendo hasta " + str(max_people) + " persona(s) a la vez")
 
     vcam = VirtualCamera(width, height, args.fps)
     if not args.no_virtualcam:
@@ -207,7 +212,6 @@ def main():
     show_hud = True
     show_bones = False
     show_face_debug = False
-    last_head = None           # cabeza del cuadro anterior, para el recorte
     fps_avg = float(args.fps)
     t_prev = time.perf_counter()
     t_start = t_prev
@@ -233,18 +237,18 @@ def main():
             timestamp_ms = int((time.perf_counter() - t_start) * 1000.0)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             landmarker.detect_async(mp_image, timestamp_ms)
-            if face is not None:
-                # A la cara NO se le manda el cuadro reducido sino un
-                # recorte de la cabeza a resolucion completa: a dos metros
-                # la cara mide ~40 px en el cuadro chico y el detector no
-                # saca nada de ahi. Se usa la cabeza del cuadro anterior,
-                # que para seguir una cabeza sobra.
-                recorte = None
-                if last_head is not None:
-                    recorte = head_crop(frame, last_head[0], last_head[1])
+            # A cada cara NO se le manda el cuadro reducido sino un recorte
+            # de SU cabeza a resolucion completa: a dos metros la cara mide
+            # ~40 px en el cuadro chico y el detector no saca nada de ahi.
+            # Se usa la cabeza del cuadro anterior, que para seguir una
+            # cabeza sobra, y cada persona tiene su propio detector.
+            for persona in crowd.people:
+                if persona.face is None or persona.head is None:
+                    continue
+                recorte = head_crop(frame, persona.head[0], persona.head[1])
                 if recorte is None:
-                    recorte = small
-                face.submit(
+                    continue
+                persona.face.submit(
                     mp.Image(image_format=mp.ImageFormat.SRGB,
                              data=cv2.cvtColor(recorte, cv2.COLOR_BGR2RGB)),
                     timestamp_ms)
@@ -256,43 +260,59 @@ def main():
                 fps_avg = fps_avg * 0.9 + (1.0 / dt) * 0.1
 
             pack = packs[pack_index]
-            landmarks = mailbox.landmarks
-            visible = presence.update(landmarks is not None)
+            activas = crowd.update(mailbox.poses)
+            visible = presence.update(bool(activas))
             background = backgrounds.get(frame)
 
-            if visible and landmarks is not None:
+            if visible and activas:
                 # Los temas con volumen se dibujan mas chico y se amplian al
                 # componer: el sombreado es suave y a media resolucion cuesta
                 # la cuarta parte, sin diferencia visible en un proyector.
                 q = args.calidad if args.calidad > 0 else (0.6 if pack.theme.volume else 1.0)
                 if q != render_q:
                     # Cambiar de escala mueve todos los puntos: los filtros
-                    # lo verian como un salto de la persona.
-                    smoother.reset()
-                    body.reset()
+                    # lo verian como un salto de la persona. Solo se olvidan
+                    # los filtros; la pose de este cuadro se va a dibujar.
+                    for persona in crowd.people:
+                        persona.reset_filters()
                     render_q = q
                 rw = max(int(width * q), 32)
                 rh = max(int(height * q), 32)
 
-                skel = sk.from_landmarks(landmarks, rw, rh,
-                                         smoother=smoother, fps=fps_avg, state=body)
-                # El recorte de cara se hace sobre el cuadro COMPLETO, pero
-                # el esqueleto puede estar en coordenadas reducidas: hay que
-                # devolver la cabeza a la escala del cuadro.
-                last_head = (skel.head_c / q, skel.head_r / q)
-                expr = face.expression if face is not None else None
-                canvas = renderer.render(skel, pack, expr)
-                if show_bones:
-                    av.draw_debug_skeleton(canvas, skel)
+                # Todas las personas se dibujan en el MISMO lienzo y se
+                # componen de una sola vez: componer por persona costaria
+                # una copia del fondo por cada una.
+                canvas = renderer.blank(rw, rh)
+                caja = None
+                glow_theme = pack.theme
+
+                for persona in activas:
+                    # Cada persona usa un avatar distinto para que se
+                    # distingan entre si; A y D los corren a todas.
+                    suyo = packs[(pack_index + persona.slot) % len(packs)]
+                    skel = sk.from_landmarks(persona.landmarks, rw, rh,
+                                             smoother=persona.smoother,
+                                             fps=fps_avg, state=persona.body)
+                    # El recorte de cara usa el cuadro COMPLETO, pero el
+                    # esqueleto puede estar reducido: se devuelve a escala.
+                    persona.head = (skel.head_c / q, skel.head_r / q)
+
+                    renderer.render(skel, suyo, persona.expression, canvas=canvas)
+                    if show_bones:
+                        av.draw_debug_skeleton(canvas, skel)
+
+                    b = skel.bbox()
+                    caja = b if caja is None else (min(caja[0], b[0]), min(caja[1], b[1]),
+                                                   max(caja[2], b[2]), max(caja[3], b[3]))
+                    if persona.slot == 0:
+                        glow_theme = suyo.theme
+
                 out = stage.composite(background, canvas,
-                                      pack.theme.glow, pack.theme.glow_strength,
-                                      roi=skel.bbox(), out=screen)
+                                      glow_theme.glow, glow_theme.glow_strength,
+                                      roi=caja, out=screen)
             else:
-                smoother.reset()
-                body.reset()      # la proxima persona puede tener otro tamano
-                last_head = None
-                if face is not None:
-                    face.reset()
+                for persona in crowd.people:
+                    persona.reset()
                 np.copyto(screen, background)
                 out = screen
                 stage.draw_banner(out, "Ponte frente a la camara",
@@ -300,12 +320,13 @@ def main():
 
             if show_hud:
                 stage.draw_hud(out, [
-                    "Avatar: " + pack.name + "   Fondo: " + backgrounds.name,
+                    "Avatar: " + pack.name + "   Fondo: " + backgrounds.name +
+                    "   Personas: " + str(len(activas)) + "/" + str(max_people),
                     "FPS: " + str(int(fps_avg)) + "   " + vcam.status(),
                     "A/D avatar   F fondo   G espejo   V camara virtual   H ocultar   Q salir",
                 ])
-                if show_face_debug and face is not None:
-                    e = face.expression
+                if show_face_debug and activas and activas[0].face is not None:
+                    e = activas[0].expression
                     stage.draw_hud(out, [
                         "CARA: " + ("detectada" if e.valid else "NO detectada"),
                         "ojo izq " + _bar(e.eye_left) + "   ojo der " + _bar(e.eye_right),
@@ -377,8 +398,7 @@ def main():
                 pass
         cap.release()
         landmarker.close()
-        if face is not None:
-            face.close()
+        crowd.close()
         vcam.close()
         cv2.destroyAllWindows()
 
