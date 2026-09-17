@@ -551,6 +551,14 @@ class AvatarRenderer:
                      _rgba(theme.outline), _rgba(theme.outline), 0, theme)
 
     def _torso(self, canvas, sk, pack, theme, ow):
+        # El cuello va PRIMERO, debajo del torso. Dibujandolo encima, su
+        # extremo redondeado quedaba a la vista en mitad del pecho, como un
+        # tubo pegado. Debajo, el torso le tapa la base y solo se ve el
+        # tramo entre los hombros y la barbilla, que es lo natural.
+        limb(canvas, sk.shoulder_c, sk.head_c,
+             PROPORTIONS["neck"][0] * sk.scale, PROPORTIONS["neck"][1] * sk.scale,
+             _rgba(theme.skin), _rgba(theme.outline), ow, theme)
+
         img = pack.part("torso")
         if img is not None:
             spec = pack.spec("torso")
@@ -563,11 +571,22 @@ class AvatarRenderer:
             quad = sk.torso_quad()
             half_top = float(np.linalg.norm(quad[1] - quad[0])) * 0.5
             half_bot = float(np.linalg.norm(quad[2] - quad[3])) * 0.5
+
+            # Una capsula sobresale por sus extremos el valor de su radio.
+            # Puesta de hombros a cadera tal cual, la tapa de arriba subia
+            # media anchura de hombros por encima y le comia el cuello. El
+            # extremo superior se baja para que la cupula quede a la altura
+            # de los hombros y no por encima.
+            eje = sk.hip_c - sk.shoulder_c
+            n = float(np.linalg.norm(eje))
+            u = eje / n if n > 1e-3 else np.array([0.0, 1.0], np.float32)
+            top = sk.shoulder_c + u * (half_top * 0.75)
+
             if ow > 0.4:
-                tapered(canvas, sk.shoulder_c, sk.hip_c,
-                        half_top + ow, half_bot + ow, _rgba(theme.outline))
-            shading.capsule(canvas, sk.shoulder_c, sk.hip_c,
-                            half_top, half_bot, theme.suit, theme.rim)
+                tapered(canvas, top, sk.hip_c, half_top + ow, half_bot + ow,
+                        _rgba(theme.outline))
+            shading.capsule(canvas, top, sk.hip_c, half_top, half_bot,
+                            theme.suit, theme.rim)
         else:
             quad = sk.torso_quad()
             center = quad.mean(axis=0)
@@ -585,13 +604,6 @@ class AvatarRenderer:
                 for corner in pts:
                     cv2.circle(canvas, _pt(corner), max(int(margin), 1), color, -1, cv2.LINE_AA)
 
-        # Cuello: va del torso hasta el centro de la cabeza, no hasta su
-        # borde. Asi la cabeza siempre le tapa la punta y solo queda a la
-        # vista el tramo entre los hombros y la barbilla. Antes terminaba
-        # antes de llegar y quedaba un cuello largo de jirafa.
-        limb(canvas, sk.shoulder_c, sk.head_c,
-             PROPORTIONS["neck"][0] * sk.scale, PROPORTIONS["neck"][1] * sk.scale,
-             _rgba(theme.skin), _rgba(theme.outline), ow, theme)
 
     def _head(self, canvas, sk, pack, theme, ow, expr=None):
         img = pack.part("head")
