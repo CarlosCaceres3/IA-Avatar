@@ -29,20 +29,35 @@ python tools/descargar_modelo.py
 
 ## Arranque rápido
 
+**Doble clic en `INICIAR.bat`.** Arranca en pantalla completa y no necesita nada más.
+Si falta el modelo lo descarga solo, y si faltan las librerías las instala.
+
+**Doble clic en `DIAGNOSTICO.bat`** para el chequeo previo al evento: paquetes,
+modelo, cámaras, FPS reales y cámara virtual.
+
+Ya hay accesos directos en el escritorio: **Avatar IA** y **Avatar IA - Chequeo**.
+Si se pierden, se recrean con clic derecho sobre cada `.bat` → *Enviar a* →
+*Escritorio (crear acceso directo)*.
+
+Desde una terminal, si prefieres:
+
 ```bash
-python avatar_cam.py
-```
-
-O doble clic en `INICIAR.bat` (arranca en pantalla completa).
-
-Antes del evento, corre el chequeo:
-
-```bash
+python avatar_cam.py --fullscreen
 python tools/diagnostico.py
 ```
 
-Verifica paquetes, modelo, cámaras, FPS reales y cámara virtual, y guarda un cuadro
-de muestra en `diagnostico.png`.
+### Opciones del stand
+
+Se editan en la línea del final de `INICIAR.bat`, o se pasan por terminal:
+
+| Opción | Para qué |
+|--------|----------|
+| `--avatar N` | con cuál arranca (0 a 10) |
+| `--personas N` | cuántas personas a la vez (1 a 4) |
+| `--deteccion 0.4` | si la segunda persona no aparece |
+| `--calidad 0.5` | más rápido si el equipo va justo |
+| `--camera 1` | si usa otra cámara |
+| `--exposure -5` | sube el FPS, pero solo con mucha luz |
 
 ---
 
@@ -81,7 +96,8 @@ interno igual. El valor por defecto ya es 640.
 El contador `Personas: 1/2` del HUD dice en todo momento a cuántas está viendo: es la
 forma rápida de ajustar estas dos perillas en el sitio.
 
-**Costo medido** en este equipo, a 720p con un tema con volumen:
+**Costo medido** en este equipo, a 720p. Los números se tomaron con el sombreado de
+volumen activo, que era el caso más pesado; con los avatares actuales sobra margen:
 
 | Personas | Por cuadro | FPS teóricos |
 |----------|-----------|--------------|
@@ -89,9 +105,8 @@ forma rápida de ajustar estas dos perillas en el sitio.
 | 2 | 23.4 ms | 43 |
 | 3 | 35.3 ms | 28 |
 
-Con dos va sobrado. **Con tres ya queda por debajo de los 30 FPS de la cámara**: si
-necesitan tres o cuatro, usen un tema plano (los que no empiezan con "3D") o bajen
-la calidad con `--calidad 0.5`.
+Con dos va sobrado. Si necesitan tres o cuatro y el equipo va justo, bajen la calidad
+con `--calidad 0.5`.
 
 ---
 
@@ -101,6 +116,7 @@ la calidad con `--calidad 0.5`.
 |-------|--------|
 | `A` / `D` | Avatar anterior / siguiente |
 | `F` | Cambiar fondo |
+| `C` | Cara real de la persona sobre el avatar |
 | `G` | Espejo on/off |
 | `E` | Mostrar el esqueleto detectado (depuración) |
 | `H` | Ocultar/mostrar los datos en pantalla |
