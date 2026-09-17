@@ -468,7 +468,7 @@ class AvatarRenderer:
         """Lienzo transparente donde dibujar uno o varios avatares."""
         return np.zeros((height, width, 4), dtype=np.uint8)
 
-    def render(self, sk, pack, expr=None, canvas=None):
+    def render(self, sk, pack, canvas=None):
         """Dibuja un avatar. Con 'canvas' se acumulan varios en el mismo.
 
         Acumular en un lienzo compartido es lo que permite varias personas
@@ -495,7 +495,7 @@ class AvatarRenderer:
         self._torso(canvas, sk, pack, theme, ow)
         self._leg(canvas, sk, pack, theme, ow, near)
         self._arm(canvas, sk, pack, theme, ow, near)
-        self._head(canvas, sk, pack, theme, ow, expr)
+        self._head(canvas, sk, pack, theme, ow)
         return canvas
 
     def _vis(self, sk, *idx):
@@ -615,7 +615,7 @@ class AvatarRenderer:
                     cv2.circle(canvas, _pt(corner), max(int(margin), 1), color, -1, cv2.LINE_AA)
 
 
-    def _head(self, canvas, sk, pack, theme, ow, expr=None):
+    def _head(self, canvas, sk, pack, theme, ow):
         img = pack.part("head")
         r = sk.head_r
 
@@ -633,24 +633,21 @@ class AvatarRenderer:
             if not theme.draw_face:
                 return
 
-        self._face(canvas, sk, theme, r, expr)
+        self._face(canvas, sk, theme, r)
 
-    def _face(self, canvas, sk, theme, r, expr):
-        """Ojos, boca y cejas, movidos por la expresion real de la persona."""
+    def _face(self, canvas, sk, theme, r):
+        """Ojos y boca del avatar: mirada viva, sin seguir la cara real."""
         a = math.radians(sk.head_angle)
         ux = np.array([math.cos(a), math.sin(a)], np.float32)     # linea de orejas
         uy = _perp(ux)                                            # hacia la barbilla
         ink = _rgba(theme.outline)
 
-        # Sin deteccion de cara, el avatar se queda con la cara neutra de
-        # siempre: ojos abiertos y media sonrisa.
+        # Cara fija: ojos abiertos y media sonrisa. Lo unico vivo es la
+        # direccion de la mirada, que sale de la nariz y no cuesta nada.
         abierto_l = abierto_r = 1.0
         boca = 0.0
         sonrisa = 0.45
         ceja = 0.0
-        if expr is not None and expr.valid:
-            abierto_l, abierto_r = expr.eye_left, expr.eye_right
-            boca, sonrisa, ceja = expr.mouth_open, expr.smile, expr.brow
 
         # La pupila se corre hacia donde apunta la nariz: da sensacion de mirada.
         gaze = (sk.pts[NOSE] - sk.head_c) / max(r, 1e-3)

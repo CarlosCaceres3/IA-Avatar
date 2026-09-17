@@ -1,9 +1,8 @@
 """Avatar en vivo por camara - demo de stand.
 
 Captura la camara, detecta la pose de la persona con MediaPipe y dibuja un
-avatar articulado que imita sus movimientos, incluida la expresion de la
-cara: si la persona cierra los ojos, el avatar los cierra. La persona real
-no aparece: en pantalla solo se ve el avatar sobre el fondo elegido.
+avatar articulado que imita sus movimientos. La persona real no aparece:
+en pantalla solo se ve el avatar sobre el fondo elegido.
 
 Uso:
     python avatar_cam.py
@@ -15,7 +14,6 @@ Teclas:
     F          fondo siguiente
     G          espejo (on/off)
     E          esqueleto de depuracion (on/off)
-    R          valores de la cara en vivo (on/off)
     H          ocultar/mostrar los datos en pantalla
     V          activar/pausar la camara virtual
     P          guardar una foto PNG en capturas/
@@ -41,7 +39,6 @@ import avatar as av                                      # noqa: E402
 import skeleton as sk                                    # noqa: E402
 import stage                                             # noqa: E402
 from camera_out import VirtualCamera                     # noqa: E402
-from face import head_crop                               # noqa: E402
 from people import Crowd                                 # noqa: E402
 from smoothing import Hysteresis                         # noqa: E402
 
@@ -49,14 +46,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 WINDOW = "Avatar IA - Festech"
 
 
-def _bar(valor, ancho=10):
-    """Barra de texto para ver un valor de 0 a 1 de un vistazo."""
-    lleno = int(round(max(0.0, min(1.0, valor)) * ancho))
-    return "[" + "#" * lleno + "." * (ancho - lleno) + "]"
 
-# El detector no gana precision con mas resolucion (internamente reescala),
-# pero si cuesta mas convertir el cuadro. Se le manda una version chica.
-INFER_WIDTH = 480
+# Ancho al que se reduce el cuadro antes de detectar. Medido en este
+# equipo, el costo de la deteccion es casi plano entre 480 y 960 px
+# (11-13 ms) porque MediaPipe reescala a su tamano interno de todas
+# formas. Pero con DOS personas cada una ocupa la mitad del cuadro, y
+# darle mas pixeles al recorte de cada una si mejora los puntos. Por eso
+# el valor por defecto es holgado: sale casi gratis.
+INFER_WIDTH = 640
 
 
 class LatestResult:
@@ -75,13 +72,13 @@ class LatestResult:
         self.stamp = timestamp_ms
 
 
-def build_landmarker(model_path, mailbox, num_poses=1):
+def build_landmarker(model_path, mailbox, num_poses=1, confidence=0.5):
     options = vision.PoseLandmarkerOptions(
         base_options=mp_python.BaseOptions(model_asset_path=model_path),
         running_mode=vision.RunningMode.LIVE_STREAM,
         num_poses=num_poses,
-        min_pose_detection_confidence=0.5,
-        min_pose_presence_confidence=0.5,
+        min_pose_detection_confidence=confidence,
+        min_pose_presence_confidence=confidence,
         min_tracking_confidence=0.5,
         output_segmentation_masks=False,
         result_callback=mailbox.push,
@@ -126,12 +123,14 @@ def parse_args():
     p.add_argument("--exposure", type=float, default=None,
                    help="exposicion manual (ej. -5). Sube el FPS si hay buena luz.")
     p.add_argument("--model", default=os.path.join(ROOT, "models", "pose_landmarker_full.task"))
-    p.add_argument("--face-model",
-                   default=os.path.join(ROOT, "models", "face_landmarker.task"))
-    p.add_argument("--no-face", action="store_true",
-                   help="no seguir la cara (ahorra CPU si hace falta)")
     p.add_argument("--personas", type=int, default=2,
                    help="cuantas personas seguir a la vez (1 a 4)")
+    p.add_argument("--deteccion", type=float, default=0.5,
+                   help="confianza minima para dar por detectada a una persona. "
+                        "Bajarla (0.4) ayuda si la segunda persona no aparece; "
+                        "subirla evita detecciones fantasma.")
+    p.add_argument("--ancho-deteccion", type=int, default=INFER_WIDTH,
+                   help="ancho al que se reduce el cuadro para detectar")
     p.add_argument("--calidad", type=float, default=0.0,
                    help="resolucion de dibujo del avatar (0 = automatica). "
                         "0.6 por defecto en los temas con volumen, 1.0 en los planos.")
@@ -169,24 +168,18 @@ def main():
     backgrounds = stage.Backgrounds(os.path.join(ROOT, "assets", "backgrounds"), (width, height))
 
     max_people = max(1, min(int(args.personas), 4))
+    infer_w = max(320, min(int(args.ancho_deteccion), 1280))
     mailbox = LatestResult()
-    landmarker = build_landmarker(args.model, mailbox, num_poses=max_people)
+    landmarker = build_landmarker(args.model, mailbox, num_poses=max_people,
+                                  confidence=args.deteccion)
     presence = Hysteresis(on_frames=2, off_frames=10)
 
-    face_model = None
-    if not args.no_face:
-        if os.path.exists(args.face_model):
-            face_model = args.face_model
-            print("Seguimiento de cara activo")
-        else:
-            print("Sin modelo de cara (" + args.face_model + ").")
-            print("Descargalo con: python tools/descargar_modelo.py --cara")
-
-    # Cada persona lleva su propio filtro, su tamano de cuerpo y su
-    # detector de cara; el reparto por cercania evita que los avatares se
-    # intercambien cuando MediaPipe cambia el orden de las poses.
-    crowd = Crowd(max_people, args.fps, face_model)
-    print("Siguiendo hasta " + str(max_people) + " persona(s) a la vez")
+    # Cada persona lleva su propio filtro y su tamano de cuerpo; el reparto
+    # por cercania evita que los avatares se intercambien cuando MediaPipe
+    # cambia el orden de las poses.
+    crowd = Crowd(max_people, args.fps)
+    print("Siguiendo hasta " + str(max_people) + " persona(s) a la vez"
+          + "  (deteccion a " + str(infer_w) + " px, confianza " + str(args.deteccion) + ")")
 
     vcam = VirtualCamera(width, height, args.fps)
     if not args.no_virtualcam:
@@ -211,7 +204,6 @@ def main():
     mirror = True
     show_hud = True
     show_bones = False
-    show_face_debug = False
     fps_avg = float(args.fps)
     t_prev = time.perf_counter()
     t_start = t_prev
@@ -229,29 +221,14 @@ def main():
             if mirror:
                 frame = cv2.flip(frame, 1)
 
-            scale = INFER_WIDTH / float(frame.shape[1])
-            small = cv2.resize(frame, (INFER_WIDTH, max(int(frame.shape[0] * scale), 1)),
+            scale = infer_w / float(frame.shape[1])
+            small = cv2.resize(frame, (infer_w, max(int(frame.shape[0] * scale), 1)),
                                interpolation=cv2.INTER_AREA)
             rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
             timestamp_ms = int((time.perf_counter() - t_start) * 1000.0)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             landmarker.detect_async(mp_image, timestamp_ms)
-            # A cada cara NO se le manda el cuadro reducido sino un recorte
-            # de SU cabeza a resolucion completa: a dos metros la cara mide
-            # ~40 px en el cuadro chico y el detector no saca nada de ahi.
-            # Se usa la cabeza del cuadro anterior, que para seguir una
-            # cabeza sobra, y cada persona tiene su propio detector.
-            for persona in crowd.people:
-                if persona.face is None or persona.head is None:
-                    continue
-                recorte = head_crop(frame, persona.head[0], persona.head[1])
-                if recorte is None:
-                    continue
-                persona.face.submit(
-                    mp.Image(image_format=mp.ImageFormat.SRGB,
-                             data=cv2.cvtColor(recorte, cv2.COLOR_BGR2RGB)),
-                    timestamp_ms)
 
             now = time.perf_counter()
             dt = now - t_prev
@@ -295,9 +272,7 @@ def main():
                                              fps=fps_avg, state=persona.body)
                     # El recorte de cara usa el cuadro COMPLETO, pero el
                     # esqueleto puede estar reducido: se devuelve a escala.
-                    persona.head = (skel.head_c / q, skel.head_r / q)
-
-                    renderer.render(skel, suyo, persona.expression, canvas=canvas)
+                    renderer.render(skel, suyo, canvas=canvas)
                     if show_bones:
                         av.draw_debug_skeleton(canvas, skel)
 
@@ -325,14 +300,6 @@ def main():
                     "FPS: " + str(int(fps_avg)) + "   " + vcam.status(),
                     "A/D avatar   F fondo   G espejo   V camara virtual   H ocultar   Q salir",
                 ])
-                if show_face_debug and activas and activas[0].face is not None:
-                    e = activas[0].expression
-                    stage.draw_hud(out, [
-                        "CARA: " + ("detectada" if e.valid else "NO detectada"),
-                        "ojo izq " + _bar(e.eye_left) + "   ojo der " + _bar(e.eye_right),
-                        "boca    " + _bar(e.mouth_open) + "   sonrisa " + _bar(e.smile),
-                        "cejas   " + _bar(e.brow),
-                    ], corner=(16, height - 110), scale=0.55)
 
             vcam.send(out)
 
@@ -359,8 +326,6 @@ def main():
                 mirror = not mirror
             elif key == ord("e"):
                 show_bones = not show_bones
-            elif key == ord("r"):
-                show_face_debug = not show_face_debug
             elif key == ord("h"):
                 show_hud = not show_hud
             elif key == ord("v"):
@@ -398,7 +363,6 @@ def main():
                 pass
         cap.release()
         landmarker.close()
-        crowd.close()
         vcam.close()
         cv2.destroyAllWindows()
 

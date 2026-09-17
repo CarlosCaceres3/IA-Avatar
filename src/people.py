@@ -6,14 +6,21 @@ ser la segunda en el cuadro siguiente. Si se dibujara segun ese orden, los
 avatares se intercambiarian entre las personas a cada rato.
 
 Por eso aqui cada persona tiene una "ranura" propia, con su filtro de
-suavizado, su tamano de cuerpo y su detector de cara. En cada cuadro las
-poses detectadas se emparejan con las ranuras por cercania, asi que quien
-ya estaba conserva su avatar aunque cambie el orden.
+suavizado y su tamano de cuerpo. En cada cuadro las poses detectadas se
+emparejan con las ranuras, asi que quien ya estaba conserva su avatar
+aunque cambie el orden.
+
+El emparejamiento no mira solo la posicion. Cuando dos personas se cruzan
+sus centros se juntan y la posicion sola no alcanza para distinguirlas,
+asi que ademas se usan:
+
+  - Hacia donde venia moviendose cada una (se predice donde deberia estar).
+  - Su altura en el cuadro, que cambia poco entre cuadros y distingue a
+    una persona alta de una baja, o a una cerca de una lejos.
 """
 
 import numpy as np
 
-from face import FaceTracker
 from skeleton import BodyState, L_HIP, L_SHOULDER, R_HIP, R_SHOULDER
 from smoothing import OneEuroFilter
 
@@ -27,6 +34,15 @@ MATCH_DIST = 0.22
 # avatar ni el tamano ya estabilizado.
 KEEP_FRAMES = 12
 
+# Cuanto pesa la diferencia de altura frente a la distancia. Con 0.35, dos
+# personas de altura muy distinta se distinguen aunque sus centros esten
+# casi encima, que es justo el caso del cruce.
+SIZE_WEIGHT = 0.35
+
+# Cuanto se conserva de la velocidad anterior. Alto, porque interesa la
+# tendencia del movimiento y no el temblor cuadro a cuadro.
+VEL_SMOOTH = 0.6
+
 
 def _center(landmarks):
     """Centro del cuerpo en coordenadas normalizadas 0..1."""
@@ -36,17 +52,48 @@ def _center(landmarks):
     return float(np.mean(xs)), float(np.mean(ys))
 
 
-class Person:
-    """Estado propio de una persona: filtros, tamano y cara."""
+def _size(landmarks):
+    """Alto aparente de la persona, como fraccion del cuadro.
 
-    def __init__(self, slot, fps, face_model=None):
+    Se mide sobre los puntos que se ven con confianza: sirve tanto si la
+    persona sale entera como si solo se le ve medio cuerpo. Es la senal
+    que distingue a alguien cerca de alguien lejos cuando ambos pasan por
+    el mismo sitio de la pantalla.
+    """
+    ys = [lm.y for lm in landmarks if getattr(lm, "visibility", 1.0) > 0.5]
+    if len(ys) < 4:
+        return 0.0
+    return float(max(ys) - min(ys))
+
+
+def _cost(persona, cx, cy, size):
+    """Cuanto 'cuesta' decir que esa pose es esta persona. Menor es mejor.
+
+    A la distancia se le suma una penalizacion por diferencia de altura.
+    Sin eso, dos personas que se cruzan intercambian avatares justo en el
+    momento del cruce, que es cuando mas se nota.
+    """
+    px = persona.center[0] + persona.velocity[0]
+    py = persona.center[1] + persona.velocity[1]
+    dist = float(np.hypot(cx - px, cy - py))
+
+    if persona.size > 0.01 and size > 0.01:
+        rel = abs(size - persona.size) / max(persona.size, size)
+        dist += min(rel, 1.0) * SIZE_WEIGHT
+    return dist
+
+
+class Person:
+    """Estado propio de una persona: filtros, tamano y movimiento."""
+
+    def __init__(self, slot, fps):
         self.slot = slot
         self.smoother = OneEuroFilter(freq=fps, min_cutoff=1.1, beta=0.018)
         self.body = BodyState()
-        self.face = FaceTracker(face_model) if face_model else None
         self.center = (0.5, 0.5)
+        self.velocity = (0.0, 0.0)
+        self.size = 0.0           # alto del cuerpo en el cuadro, 0..1
         self.landmarks = None
-        self.head = None          # (centro, radio) en coordenadas del cuadro
         self.missing = 0
         self.seen = False
 
@@ -63,33 +110,23 @@ class Person:
     def reset(self):
         """Olvida todo: la ranura pasa a ser de otra persona."""
         self.reset_filters()
-        if self.face is not None:
-            self.face.reset()
         self.landmarks = None
-        self.head = None
-
-    @property
-    def expression(self):
-        return self.face.expression if self.face is not None else None
-
-    def close(self):
-        if self.face is not None:
-            self.face.close()
+        self.velocity = (0.0, 0.0)
+        self.size = 0.0
 
 
 class Crowd:
     """Reparte las poses detectadas entre ranuras estables."""
 
-    def __init__(self, max_people, fps, face_model=None):
+    def __init__(self, max_people, fps):
         self.max_people = max_people
         self.fps = fps
-        self.face_model = face_model
         self.people = []
 
     def _nueva(self):
         if len(self.people) >= self.max_people:
             return None
-        persona = Person(len(self.people), self.fps, self.face_model)
+        persona = Person(len(self.people), self.fps)
         self.people.append(persona)
         return persona
 
@@ -108,11 +145,14 @@ class Crowd:
         # Primero las que se pueden emparejar con alguien conocido: se
         # recorren por cercania creciente para que dos personas juntas no
         # se roben la ranura entre si.
+        medidas = [(_center(lm)[0], _center(lm)[1], _size(lm)) for lm in poses]
+
         parejas = []
-        for pose_idx, landmarks in enumerate(poses):
-            cx, cy = _center(landmarks)
+        for pose_idx, (cx, cy, size) in enumerate(medidas):
             for persona in libres:
-                d = np.hypot(cx - persona.center[0], cy - persona.center[1])
+                if persona.landmarks is None and persona.missing >= KEEP_FRAMES:
+                    continue           # ranura libre: no compite por emparejar
+                d = _cost(persona, cx, cy, size)
                 if d <= MATCH_DIST:
                     parejas.append((d, pose_idx, persona))
         parejas.sort(key=lambda t: t[0])
@@ -124,21 +164,21 @@ class Crowd:
                 continue
             usadas_pose.add(pose_idx)
             usadas_slot.add(persona.slot)
-            self._asignar(persona, poses[pose_idx])
+            self._asignar(persona, poses[pose_idx], medidas[pose_idx])
 
         for pose_idx, landmarks in enumerate(poses):
             if pose_idx not in usadas_pose:
-                pendientes.append(landmarks)
+                pendientes.append((landmarks, medidas[pose_idx]))
 
         # Las que no coincidieron con nadie: ranura libre o una nueva.
-        for landmarks in pendientes:
+        for landmarks, medida in pendientes:
             persona = next((p for p in self.people if not p.seen), None)
             if persona is None:
                 persona = self._nueva()
             if persona is None:
                 break                      # ya se alcanzo el maximo
             persona.reset()                # es alguien distinto al de antes
-            self._asignar(persona, landmarks)
+            self._asignar(persona, landmarks, medida)
 
         activas = []
         for p in self.people:
@@ -152,12 +192,20 @@ class Crowd:
                 p.landmarks = None
         return activas
 
-    def _asignar(self, persona, landmarks):
+    def _asignar(self, persona, landmarks, medida):
+        cx, cy, size = medida
+        if persona.landmarks is not None:
+            # Velocidad suavizada: sirve para predecir donde va a estar en
+            # el cuadro siguiente y no perderla cuando se mueve rapido.
+            vx = cx - persona.center[0]
+            vy = cy - persona.center[1]
+            persona.velocity = (persona.velocity[0] * VEL_SMOOTH + vx * (1 - VEL_SMOOTH),
+                                persona.velocity[1] * VEL_SMOOTH + vy * (1 - VEL_SMOOTH))
         persona.landmarks = landmarks
-        persona.center = _center(landmarks)
+        persona.center = (cx, cy)
+        if size > 0.01:
+            # La altura se promedia: un cuadro con los pies mal detectados
+            # no debe cambiar de golpe la referencia de tamano.
+            persona.size = size if persona.size <= 0.01 else persona.size * 0.8 + size * 0.2
         persona.seen = True
 
-    def close(self):
-        for p in self.people:
-            p.close()
-        self.people = []

@@ -1,9 +1,8 @@
 # Avatar IA en vivo — demo para stand
 
 Una persona se para frente a la cámara y en pantalla aparece un avatar articulado
-que copia sus movimientos en tiempo real, **incluida la expresión de la cara**: si
-cierra los ojos, el avatar los cierra; si abre la boca, el avatar la abre. La persona
-real no se ve: solo el avatar sobre el fondo elegido. La salida se puede enviar a una **cámara virtual** para que
+que copia sus movimientos en tiempo real. La persona real no se ve: solo el avatar
+sobre el fondo elegido. La salida se puede enviar a una **cámara virtual** para que
 Zoom, Meet, OBS o el proyector la tomen como si fuera una webcam más.
 
 Todo corre **local, en CPU y sin internet** una vez descargado el modelo.
@@ -22,7 +21,7 @@ Requiere Python 3.9–3.13.
 pip install -r requirements.txt
 ```
 
-Los modelos (9 MB el de pose, 3.6 MB el de cara) no vienen en el repositorio:
+El modelo de pose (9 MB) no viene en el repositorio, se descarga aparte:
 
 ```bash
 python tools/descargar_modelo.py
@@ -57,15 +56,30 @@ python avatar_cam.py --personas 3      # hasta 3 (1 a 4)
 python avatar_cam.py --personas 1      # una sola, lo mas rapido
 ```
 
-Cada persona lleva su propio filtro de suavizado, su propio tamaño de cuerpo y su
-propio detector de cara.
+Cada persona lleva su propio filtro de suavizado y su propio tamaño de cuerpo.
 
 **Por qué no basta con pedirle varias poses a MediaPipe:** el detector no garantiza
 devolverlas siempre en el mismo orden, así que asignar el avatar por posición en la
 lista haría que dos personas se intercambiaran los avatares constantemente. En cada
-cuadro las poses se emparejan con las personas ya conocidas **por cercanía**, así que
-quien ya estaba conserva el suyo. Si alguien desaparece un instante, su avatar lo
-espera 12 cuadros antes de liberarse.
+cuadro las poses se emparejan con las personas ya conocidas por **cercanía**, por
+**hacia dónde venían moviéndose** y por su **altura en el cuadro**, así que quien ya
+estaba conserva el suyo. Si alguien desaparece un instante, su avatar lo espera 12
+cuadros antes de liberarse.
+
+**Si la segunda persona no se detecta**, hay dos perillas:
+
+```bash
+python avatar_cam.py --deteccion 0.4        # menos exigente al detectar
+python avatar_cam.py --ancho-deteccion 800  # mas pixeles por persona
+```
+
+Bajar `--deteccion` ayuda cuando la segunda persona sale parcialmente tapada; subirla
+evita detecciones fantasma. El ancho de detección cuesta poco: medido en este equipo,
+la detección tarda 11-13 ms entre 480 y 960 px, porque MediaPipe reescala a su tamaño
+interno igual. El valor por defecto ya es 640.
+
+El contador `Personas: 1/2` del HUD dice en todo momento a cuántas está viendo: es la
+forma rápida de ajustar estas dos perillas en el sitio.
 
 **Costo medido** en este equipo, a 720p con un tema con volumen:
 
@@ -89,7 +103,6 @@ la calidad con `--calidad 0.5`.
 | `F` | Cambiar fondo |
 | `G` | Espejo on/off |
 | `E` | Mostrar el esqueleto detectado (depuración) |
-| `R` | Mostrar los valores de la cara en vivo (depuración) |
 | `H` | Ocultar/mostrar los datos en pantalla |
 | `V` | Activar/pausar la cámara virtual |
 | `P` | Guardar una foto PNG en `capturas/` |
@@ -101,16 +114,15 @@ la calidad con `--calidad 0.5`.
 ## Cómo funciona
 
 ```
-            ┌─► PoseLandmarker ──► 33 puntos del cuerpo ──► One Euro ─┐
-webcam ──►──┤                                                         ├─► avatar
-            └─► FaceLandmarker ──► expresión (ojos, boca, cejas) ─────┘     │
-                                                                            │
-                                        fondo + halo ──► ventana + cámara virtual
+webcam ──► PoseLandmarker ──► 33 puntos por persona ──► One Euro
+                                        │
+                        reparto por persona (cada una su avatar)
+                                        │
+                     renderizador ──► fondo + halo ──► ventana + cámara virtual
 ```
 
-Los dos detectores corren **en su propio hilo** y el bucle principal nunca los
-espera: toma el último resultado disponible de cada uno. Por eso agregar la cara no
-baja los FPS del cuerpo.
+El detector corre **en su propio hilo** y el bucle principal nunca lo espera: toma
+el último resultado disponible.
 
 - **`src/skeleton.py`** convierte los 33 puntos normalizados de MediaPipe en
   píxeles y calcula lo derivado: centro de hombros y cadera, radio y giro de la
@@ -120,8 +132,8 @@ baja los FPS del cuerpo.
 - **`src/avatar.py`** dibuja el cuerpo de atrás hacia adelante (pierna lejana,
   brazo lejano, torso, pierna cercana, brazo cercano, cabeza) para que las partes
   se tapen en el orden correcto.
-- **`src/face.py`** traduce los 52 *blendshapes* de MediaPipe (valores de 0 a 1 por
-  expresión) a los cinco que se dibujan: apertura de cada ojo, boca, sonrisa y cejas.
+- **`src/people.py`** reparte las poses detectadas entre personas estables, para que
+  cada una conserve su avatar entre cuadros.
 - **`src/stage.py`** genera el fondo, pega el avatar y le agrega el halo.
 - **`src/camera_out.py`** envía el resultado a la cámara virtual.
 
@@ -224,8 +236,8 @@ Los colores y ajustes van en `theme.json` dentro de la carpeta del pack:
 ```
 
 - `skin` cubre las partes sin PNG (por ejemplo el cuello): pónganla en el tono del pack.
-- `draw_face: true` hace que el programa pinte los ojos **encima** de `head.png`, y
-  esos ojos siguen a la persona. Si su dibujo ya trae cara, pónganlo en `false`.
+- `draw_face: true` hace que el programa pinte los ojos y la boca **encima** de
+  `head.png`. Si su dibujo ya trae cara, pónganlo en `false`.
 - `parts` es opcional y sirve para retocar: `size` agranda la pieza, `width` la
   ensancha, y `a` / `b` / `anchor` permiten fijar las articulaciones a mano si la
   detección automática no acierta. Lo que declaren se combina con lo detectado.
@@ -390,41 +402,3 @@ movimiento rápido se siente un poco más lento.
 
 **Se ve todo espejado al revés** — presiona `G`.
 
----
-
-## Expresión de la cara
-
-El avatar copia la cara de la persona: si cierra un ojo, el avatar cierra ese ojo;
-si abre la boca o levanta las cejas, el avatar también.
-
-MediaPipe entrega 52 *blendshapes* (un valor de 0 a 1 por cada expresión del rostro).
-`src/face.py` se queda con cinco y los convierte a algo directo de dibujar:
-
-| Valor | De dónde sale | Qué dibuja |
-|-------|---------------|------------|
-| apertura de cada ojo | `eyeBlinkLeft` / `eyeBlinkRight`, invertido | ojo abierto, entornado o cerrado |
-| boca | `jawOpen` | óvalo que crece con la mandíbula |
-| sonrisa | `mouthSmileLeft` + `mouthSmileRight` | curva de la boca |
-| cejas | `browInnerUp`, `browOuterUp*` | cejas que suben |
-
-**Presiona `R` para ver los valores en vivo** sobre el video. Sirve para confirmar
-que la cara se está detectando y para ajustar la iluminación del stand.
-
-El suavizado de los ojos es corto a propósito: un parpadeo dura unos 100 ms, o sea
-tres cuadros a 30 FPS. Filtrar más fuerte se los comería y el efecto se pierde.
-
-**Si los guiños salen del lado cambiado**, pon `SWAP_EYES = True` al inicio de
-`src/face.py`. Los blendshapes vienen nombrados desde el punto de vista de la
-persona y el cuadro se voltea antes de detectar, así que el lado depende de la cámara.
-
-**Si la cara no se detecta**, casi siempre es una de tres: la persona está muy lejos
-(el cuerpo se detecta a más distancia que la cara), está muy de perfil, o falta luz
-en el rostro. La tecla `R` lo dice al instante.
-
-Si el equipo del stand va justo de CPU, se puede apagar:
-
-```bash
-python avatar_cam.py --no-face
-```
-
-El avatar queda con la cara neutra de siempre y todo lo demás sigue igual.
