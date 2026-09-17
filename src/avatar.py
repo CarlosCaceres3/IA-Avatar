@@ -91,32 +91,6 @@ THEMES = [
         outline=(20, 45, 80), glow=(60, 180, 240), glow_strength=0.6,
     ),
 
-    # Temas con volumen: mismas siluetas, pero sombreadas como cilindros y
-    # esferas. Es lo que separa un muneco de palos de un personaje.
-    Theme(
-        name="3D Azul",
-        suit=(190, 105, 45), skin=(150, 190, 225), accent=(225, 165, 80),
-        outline=(40, 28, 20), glow=(200, 120, 50), glow_strength=0.30,
-        outline_w=0.016, volume=True, rim=(255, 225, 180),
-    ),
-    Theme(
-        name="3D Heroe",
-        suit=(55, 55, 205), skin=(150, 190, 235), accent=(60, 185, 240),
-        outline=(25, 20, 45), glow=(70, 90, 225), glow_strength=0.35,
-        outline_w=0.016, volume=True, rim=(220, 240, 255),
-    ),
-    Theme(
-        name="3D Robot",
-        suit=(165, 160, 150), skin=(200, 198, 195), accent=(50, 140, 245),
-        outline=(38, 34, 30), glow=(60, 150, 245), glow_strength=0.30,
-        outline_w=0.016, volume=True, rim=(235, 245, 255),
-    ),
-    Theme(
-        name="3D Oro",
-        suit=(45, 150, 230), skin=(150, 205, 240), accent=(90, 200, 250),
-        outline=(18, 45, 78), glow=(60, 175, 240), glow_strength=0.45,
-        outline_w=0.016, volume=True, rim=(190, 240, 255),
-    ),
 ]
 
 

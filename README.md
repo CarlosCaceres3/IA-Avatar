@@ -156,28 +156,25 @@ pueden tener varios equipos y alternarlos durante el evento.
 
 Opciones: `--camiseta --pantaloneta --medias --botines --piel --pelo --numero --nombre`.
 
-### Avatares con volumen (3D)
+### Sombreado con volumen (desactivado)
 
-Los temas que empiezan con **3D** (`3D Azul`, `3D Heroe`, `3D Robot`, `3D Oro`) no
-se pintan con colores lisos: cada extremidad se sombrea como un **cilindro** y la
-cabeza como una **esfera**, con luz difusa, brillo especular, luz de contorno y
-sombra de contacto en el piso. Es el mismo esqueleto de siempre — lo que cambia es
-cómo se pinta cada parte.
+El motor sabe sombrear cada extremidad como un cilindro y la cabeza como una esfera
+(luz, brillo, contorno y sombra en el piso). Ningún avatar lo usa por defecto: los
+temas que lo activaban se quitaron a pedido.
 
-Se cambian con `A` / `D` como cualquier otro avatar.
+Para recuperarlo, basta agregar un `Theme` en `src/avatar.py` con `volume=True`:
 
-Para crear uno propio, basta agregar un `Theme` en `src/avatar.py` con
-`volume=True`, elegir los colores y el color de la luz de contorno (`rim`).
-
-**Sobre el costo:** sombrear píxel a píxel cuesta caro. A resolución completa eran
-55 ms por cuadro (18 FPS). Por eso los temas con volumen se dibujan a **0.6 de la
-resolución** y se amplían al componer: el sombreado es suave, así que a distancia de
-proyector no se nota, y baja a 22 ms (46 FPS). Se puede forzar con:
-
-```bash
-python avatar_cam.py --calidad 1.0     # máxima calidad, más lento
-python avatar_cam.py --calidad 0.5     # más rápido, un poco más suave
+```python
+Theme(
+    name="3D Azul",
+    suit=(190, 105, 45), skin=(150, 190, 225), accent=(225, 165, 80),
+    outline=(40, 28, 20), glow=(200, 120, 50), glow_strength=0.30,
+    outline_w=0.016, volume=True, rim=(255, 225, 180),
+),
 ```
+
+El código está en `src/shading.py`. Cuesta unos 22 ms por cuadro a 720p (contra 3 ms
+del dibujo plano), por eso se dibuja a 0.6 de resolución y se amplía al componer.
 
 ### Poner sus propias imágenes
 
